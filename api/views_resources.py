@@ -17,8 +17,8 @@ from beacon.template import build_template_context, render_template
 from .errors import api_error
 from .permissions import VerifiedEmailForUnsafeMethods
 from .serializers import (
-    BarkChannelUpsertRequestSerializer,
     BatchDeleteRequestSerializer,
+    ChannelUpsertRequestSerializer,
     ChannelSerializer,
     DeliverySerializer,
     IngestEndpointCreateRequestSerializer,
@@ -181,7 +181,7 @@ class ChannelsView(APIView):
         return Response({"channels": ChannelSerializer(qs, many=True).data}, status=200)
 
     def post(self, request):
-        ser = BarkChannelUpsertRequestSerializer(data=request.data)
+        ser = ChannelUpsertRequestSerializer(data=request.data)
         if not ser.is_valid():
             return api_error(
                 code="validation_error",
@@ -193,7 +193,7 @@ class ChannelsView(APIView):
         cfg = ser.validated_data["config"]
         channel = Channel(
             user=request.user,
-            type="bark",
+            type=ser.validated_data["type"],
             name=ser.validated_data["name"],
             config_json_encrypted="",
         )
@@ -219,7 +219,7 @@ class ChannelDetailView(APIView):
         )
 
     def patch(self, request, id: str):
-        ser = BarkChannelUpsertRequestSerializer(data=request.data)
+        ser = ChannelUpsertRequestSerializer(data=request.data)
         if not ser.is_valid():
             return api_error(
                 code="validation_error",
@@ -232,6 +232,14 @@ class ChannelDetailView(APIView):
             channel = Channel.objects.get(user=request.user, id=id)
         except Channel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
+
+        if ser.validated_data["type"] != channel.type:
+            return api_error(
+                code="validation_error",
+                message="invalid request",
+                status=400,
+                details={"type": ["type_mismatch"]},
+            )
 
         cfg = ser.validated_data["config"]
         channel.name = ser.validated_data["name"]
@@ -273,13 +281,20 @@ class RulesView(APIView):
         except Channel.DoesNotExist:
             return api_error(code="not_found", message="channel not found", status=404)
 
+        tpl = (
+            ser.validated_data.get("payload_template")
+            or ser.validated_data.get("bark_payload_template")
+            or {}
+        )
+
         rule = ForwardingRule.objects.create(
             user=request.user,
             name=ser.validated_data["name"],
             enabled=ser.validated_data["enabled"],
             channel=channel,
             filter_json=ser.validated_data.get("filter") or {},
-            bark_payload_template_json=ser.validated_data["bark_payload_template"],
+            bark_payload_template_json=tpl,
+            payload_template_json=tpl,
         )
         return Response({"rule": RuleSerializer(rule).data}, status=201)
 
@@ -316,11 +331,18 @@ class RuleDetailView(APIView):
         except Channel.DoesNotExist:
             return api_error(code="not_found", message="channel not found", status=404)
 
+        tpl = (
+            ser.validated_data.get("payload_template")
+            or ser.validated_data.get("bark_payload_template")
+            or {}
+        )
+
         rule.name = ser.validated_data["name"]
         rule.enabled = ser.validated_data["enabled"]
         rule.channel = channel
         rule.filter_json = ser.validated_data.get("filter") or {}
-        rule.bark_payload_template_json = ser.validated_data["bark_payload_template"]
+        rule.bark_payload_template_json = tpl
+        rule.payload_template_json = tpl
         rule.save()
 
         return Response({"rule": RuleSerializer(rule).data}, status=200)
@@ -373,9 +395,16 @@ class RuleTestView(APIView):
 
         matches = rule_matches_message(rule, msg)
         ctx = build_template_context(msg, ep)
-        rendered = render_template(rule.bark_payload_template_json or {}, ctx)
+        tpl = rule.payload_template_json or rule.bark_payload_template_json or {}
+        rendered = render_template(tpl, ctx)
         return Response(
-            {"matches": bool(matches), "rendered_bark_payload": rendered}, status=200
+            {
+                "matches": bool(matches),
+                "channel_type": rule.channel.type,
+                "rendered_payload": rendered,
+                "rendered_bark_payload": rendered,
+            },
+            status=200,
         )
 
 

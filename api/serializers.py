@@ -99,6 +99,79 @@ class BarkChannelUpsertRequestSerializer(serializers.Serializer):
     config = BarkChannelConfigSerializer()
 
 
+class NtfyChannelConfigSerializer(serializers.Serializer):
+    server_base_url = serializers.CharField()
+    topic = serializers.CharField()
+    access_token = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    username = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    password = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    default_headers_json = serializers.DictField(required=False)
+
+    def validate(self, attrs):
+        access_token = (attrs.get("access_token") or "").strip()
+        username = (attrs.get("username") or "").strip()
+        password = attrs.get("password") or ""
+
+        if access_token and (username or password):
+            raise serializers.ValidationError("choose_one_auth_method")
+        if (username and not password) or (password and not username):
+            raise serializers.ValidationError("username_password_required")
+
+        return attrs
+
+
+class MqttChannelConfigSerializer(serializers.Serializer):
+    broker_host = serializers.CharField()
+    broker_port = serializers.IntegerField(required=False, min_value=1, max_value=65535)
+    topic = serializers.CharField()
+
+    username = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    password = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    tls = serializers.BooleanField(required=False)
+    tls_insecure = serializers.BooleanField(required=False)
+    qos = serializers.IntegerField(required=False, min_value=0, max_value=2)
+    retain = serializers.BooleanField(required=False)
+    client_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    keepalive_seconds = serializers.IntegerField(
+        required=False, min_value=1, max_value=3600
+    )
+
+    def validate(self, attrs):
+        username = (attrs.get("username") or "").strip()
+        password = attrs.get("password")
+        if (username and password is None) or (password and not username):
+            raise serializers.ValidationError("username_password_required")
+        return attrs
+
+
+class ChannelUpsertRequestSerializer(serializers.Serializer):
+    type = serializers.ChoiceField(choices=["bark", "ntfy", "mqtt"])
+    name = serializers.CharField()
+    config = serializers.DictField()
+
+    def validate(self, attrs):
+        t = attrs.get("type")
+        cfg = attrs.get("config") or {}
+
+        if t == "bark":
+            ser = BarkChannelConfigSerializer(data=cfg)
+        elif t == "ntfy":
+            ser = NtfyChannelConfigSerializer(data=cfg)
+        elif t == "mqtt":
+            ser = MqttChannelConfigSerializer(data=cfg)
+        else:
+            raise serializers.ValidationError("invalid_type")
+
+        if not ser.is_valid():
+            raise serializers.ValidationError({"config": ser.errors})
+
+        attrs["config"] = ser.validated_data
+        return attrs
+
+
 class ChannelSerializer(serializers.ModelSerializer):
     created_at = serializers.SerializerMethodField()
     disabled_at = serializers.SerializerMethodField()
@@ -119,7 +192,16 @@ class RuleUpsertRequestSerializer(serializers.Serializer):
     enabled = serializers.BooleanField()
     channel_id = serializers.UUIDField()
     filter = serializers.DictField(required=False)
-    bark_payload_template = serializers.DictField()
+    payload_template = serializers.DictField(required=False)
+    bark_payload_template = serializers.DictField(required=False)
+
+    def validate(self, attrs):
+        if (
+            attrs.get("payload_template") is None
+            and attrs.get("bark_payload_template") is None
+        ):
+            raise serializers.ValidationError({"payload_template": ["required"]})
+        return attrs
 
 
 class RuleSerializer(serializers.ModelSerializer):
@@ -128,6 +210,7 @@ class RuleSerializer(serializers.ModelSerializer):
     channel_id = serializers.SerializerMethodField()
     filter = serializers.SerializerMethodField()
     bark_payload_template = serializers.SerializerMethodField()
+    payload_template = serializers.SerializerMethodField()
 
     class Meta:
         model = ForwardingRule
@@ -138,6 +221,7 @@ class RuleSerializer(serializers.ModelSerializer):
             "channel_id",
             "filter",
             "bark_payload_template",
+            "payload_template",
             "created_at",
             "updated_at",
         ]
@@ -156,6 +240,9 @@ class RuleSerializer(serializers.ModelSerializer):
 
     def get_bark_payload_template(self, obj: ForwardingRule):
         return obj.bark_payload_template_json or {}
+
+    def get_payload_template(self, obj: ForwardingRule):
+        return obj.payload_template_json or obj.bark_payload_template_json or {}
 
 
 class RuleTestRequestSerializer(serializers.Serializer):

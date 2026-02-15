@@ -57,7 +57,13 @@ class Message(models.Model):
 
 class Channel(models.Model):
     TYPE_BARK = "bark"
-    TYPE_CHOICES = [(TYPE_BARK, "bark")]
+    TYPE_NTFY = "ntfy"
+    TYPE_MQTT = "mqtt"
+    TYPE_CHOICES = [
+        (TYPE_BARK, "bark"),
+        (TYPE_NTFY, "ntfy"),
+        (TYPE_MQTT, "mqtt"),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -93,6 +99,7 @@ class ForwardingRule(models.Model):
     filter_json = models.JSONField(default=dict)
     channel = models.ForeignKey(Channel, on_delete=models.CASCADE)
     bark_payload_template_json = models.JSONField(default=dict)
+    payload_template_json = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -101,6 +108,12 @@ class ForwardingRule(models.Model):
         indexes = [
             models.Index(fields=["user", "created_at"]),
         ]
+
+    def get_payload_template(self) -> dict:
+        val = self.payload_template_json
+        if isinstance(val, dict) and val:
+            return val
+        return self.bark_payload_template_json or {}
 
 
 class Delivery(models.Model):

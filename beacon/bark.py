@@ -25,7 +25,8 @@ def build_bark_payload(
     default_payload = cfg.get("default_payload_json") or {}
 
     ctx = build_template_context(message, ingest_endpoint)
-    rendered = render_template(rule.bark_payload_template_json or {}, ctx)
+    tpl = rule.payload_template_json or rule.bark_payload_template_json or {}
+    rendered = render_template(tpl, ctx)
 
     payload = dict(default_payload)
     if isinstance(rendered, dict):

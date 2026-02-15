@@ -256,6 +256,16 @@ BARK_BLOCK_PRIVATE_NETWORKS = (
     os.environ.get("BARK_BLOCK_PRIVATE_NETWORKS", "true").lower() == "true"
 )
 
+NTFY_REQUEST_TIMEOUT_SECONDS = int(os.environ.get("NTFY_REQUEST_TIMEOUT_SECONDS", "5"))
+NTFY_BLOCK_PRIVATE_NETWORKS = (
+    os.environ.get("NTFY_BLOCK_PRIVATE_NETWORKS", "true").lower() == "true"
+)
+
+MQTT_SOCKET_TIMEOUT_SECONDS = int(os.environ.get("MQTT_SOCKET_TIMEOUT_SECONDS", "5"))
+MQTT_BLOCK_PRIVATE_NETWORKS = (
+    os.environ.get("MQTT_BLOCK_PRIVATE_NETWORKS", "true").lower() == "true"
+)
+
 CHANNEL_CONFIG_ENCRYPTION_KEY = os.environ.get("CHANNEL_CONFIG_ENCRYPTION_KEY", "")
 
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")

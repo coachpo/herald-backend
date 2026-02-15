@@ -7,6 +7,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from beacon.bark import build_bark_payload, send_bark_push
+from beacon.mqtt import send_mqtt_publish
+from beacon.ntfy import build_ntfy_request, send_ntfy_publish
+from beacon.template import build_template_context, render_template
 from beacon.models import Delivery
 
 
@@ -57,18 +60,78 @@ class Command(BaseCommand):
                 d.save(update_fields=["status", "last_error", "updated_at"])
                 return
 
-            channel_cfg = d.channel.config
-            server_base_url = str(channel_cfg.get("server_base_url") or "").strip()
-            if not server_base_url:
-                raise ValueError("missing_server_base_url")
+            t = str(d.channel.type or "").strip()
+            meta: dict
 
-            payload = build_bark_payload(
-                channel=d.channel,
-                rule=d.rule,
-                message=d.message,
-                ingest_endpoint=d.message.ingest_endpoint,
-            )
-            ok, meta = send_bark_push(server_base_url=server_base_url, payload=payload)
+            if t == "bark":
+                channel_cfg = d.channel.config
+                server_base_url = str(channel_cfg.get("server_base_url") or "").strip()
+                if not server_base_url:
+                    raise ValueError("missing_server_base_url")
+
+                payload = build_bark_payload(
+                    channel=d.channel,
+                    rule=d.rule,
+                    message=d.message,
+                    ingest_endpoint=d.message.ingest_endpoint,
+                )
+                ok, meta = send_bark_push(
+                    server_base_url=server_base_url, payload=payload
+                )
+            elif t == "ntfy":
+                url, body, headers, auth = build_ntfy_request(
+                    channel=d.channel,
+                    rule=d.rule,
+                    message=d.message,
+                    ingest_endpoint=d.message.ingest_endpoint,
+                )
+                ok, meta = send_ntfy_publish(
+                    url=url, body=body, headers=headers, auth=auth
+                )
+            elif t == "mqtt":
+                cfg = d.channel.config
+                broker_host = str(cfg.get("broker_host") or "").strip()
+                broker_port = int(cfg.get("broker_port") or 1883)
+                topic = str(cfg.get("topic") or "").strip()
+                username = str(cfg.get("username") or "").strip() or None
+                password = str(cfg.get("password") or "") if username else None
+                qos = int(cfg.get("qos") or 0)
+                retain = bool(cfg.get("retain") or False)
+                tls = bool(cfg.get("tls") or False)
+                tls_insecure = bool(cfg.get("tls_insecure") or False)
+                client_id = str(cfg.get("client_id") or "").strip() or None
+                keepalive = int(cfg.get("keepalive_seconds") or 60)
+
+                ctx = build_template_context(d.message, d.message.ingest_endpoint)
+                rendered = render_template(d.rule.get_payload_template(), ctx)
+                payload_obj: object = rendered
+                if isinstance(rendered, dict):
+                    if rendered.get("body") is not None:
+                        payload_obj = rendered.get("body")
+                    elif rendered.get("payload") is not None:
+                        payload_obj = rendered.get("payload")
+                    elif rendered.get("message") is not None:
+                        payload_obj = rendered.get("message")
+
+                ok, meta = send_mqtt_publish(
+                    broker_host=broker_host,
+                    broker_port=broker_port,
+                    topic=topic,
+                    payload=payload_obj,
+                    username=username,
+                    password=password,
+                    qos=qos,
+                    retain=retain,
+                    tls=tls,
+                    tls_insecure=tls_insecure,
+                    client_id=client_id,
+                    keepalive_seconds=keepalive,
+                )
+            else:
+                raise ValueError("unsupported_channel_type")
+
+            meta = dict(meta)
+            meta.setdefault("provider", t)
 
             d.provider_response_json = meta
             if ok:
