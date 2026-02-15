@@ -1,11 +1,27 @@
 # Beacon Spear Backend (Django)
 
-Placeholder repository.
+Implements the v0.1 backend JSON API + ingest endpoint + delivery worker.
 
-Planned responsibilities:
-- Django backend JSON API under `/api/*`
-- Public ingest endpoint: `POST /api/ingest/{token}`
-- Background worker for Bark v2 deliveries (exponential backoff)
-- Postgres persistence
+## Local dev
 
-See the meta repo design docs for the v0.1 spec.
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python manage.py migrate
+python manage.py runserver 0.0.0.0:8000
+```
+
+Run the worker in a second terminal:
+
+```bash
+. .venv/bin/activate
+python manage.py deliveries_worker
+```
+
+## Notes
+
+- APIs are served under `/api/*`.
+- Ingest endpoint: `POST /api/ingest/{token}`.
+- Dashboard auth uses JWT access tokens (`Authorization: Bearer ...`) and an HttpOnly refresh cookie.

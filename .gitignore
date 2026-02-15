@@ -1,0 +1,9 @@
+.DS_Store
+.env
+.env.*
+.python-version
+.venv/
+__pycache__/
+*.pyc
+
+db.sqlite3
