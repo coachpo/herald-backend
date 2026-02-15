@@ -42,3 +42,16 @@ def send_password_reset_email(*, user: User, token: str):
         )
     except Exception as e:
         raise EmailSendError("password_reset_email_failed") from e
+
+
+def send_account_deleted_email(*, email: str, deleted_at):
+    try:
+        send_mail(
+            subject="Account deleted",
+            message=f"Your account was deleted at {deleted_at.isoformat()}.",
+            from_email=_from_email(),
+            recipient_list=[email],
+            fail_silently=False,
+        )
+    except Exception as e:
+        raise EmailSendError("account_deleted_email_failed") from e

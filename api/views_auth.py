@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from accounts.flows import create_email_verification, create_password_reset
 from accounts.jwt import issue_access_token
-from accounts.emails import EmailSendError
+from accounts.emails import EmailSendError, send_account_deleted_email
 from accounts.models import EmailVerificationToken, PasswordResetToken, User
 from accounts.sessions import (
     create_refresh_token,
@@ -23,9 +23,12 @@ from accounts.sessions import (
 )
 from accounts.tokens import hash_token
 
+from beacon.models import IngestEndpoint
+
 from .errors import api_error
 from .ratelimit import allow_rate
 from .serializers import (
+    DeleteAccountRequestSerializer,
     ChangeEmailRequestSerializer,
     ChangePasswordRequestSerializer,
     ForgotPasswordRequestSerializer,
@@ -396,3 +399,41 @@ class ChangePasswordView(APIView):
         user.save(update_fields=["password"])
         revoke_all_refresh_tokens(user=user, reason="password_changed")
         return Response(status=204)
+
+
+class DeleteAccountView(APIView):
+    def post(self, request):
+        ser = DeleteAccountRequestSerializer(data=request.data)
+        if not ser.is_valid():
+            return api_error(
+                code="validation_error",
+                message="invalid request",
+                status=400,
+                details=ser.errors,
+            )
+
+        user: User = request.user
+        if not user.check_password(ser.validated_data["password"]):
+            return api_error(
+                code="invalid_credentials", message="invalid credentials", status=401
+            )
+
+        email = user.email
+        now = timezone.now()
+
+        revoke_all_refresh_tokens(user=user, reason="account_deleted")
+        IngestEndpoint.objects.filter(user=user, revoked_at__isnull=True).update(
+            revoked_at=now
+        )
+
+        user.delete()
+
+        resp = Response(status=204)
+        _clear_refresh_cookie(resp)
+
+        try:
+            send_account_deleted_email(email=email, deleted_at=now)
+        except EmailSendError:
+            logger.exception("account_deleted_email_failed", extra={"email": email})
+
+        return resp

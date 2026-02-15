@@ -54,6 +54,16 @@ class ChangePasswordRequestSerializer(serializers.Serializer):
     new_password = serializers.CharField(min_length=8)
 
 
+class DeleteAccountRequestSerializer(serializers.Serializer):
+    password = serializers.CharField()
+    confirm = serializers.CharField()
+
+    def validate_confirm(self, value: str):
+        if (value or "").strip() != "DELETE":
+            raise serializers.ValidationError("must_equal_DELETE")
+        return value
+
+
 class IngestEndpointSerializer(serializers.ModelSerializer):
     created_at = serializers.SerializerMethodField()
     last_used_at = serializers.SerializerMethodField()
