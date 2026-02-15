@@ -57,11 +57,11 @@ class IngestEndpointsView(APIView):
             token_hash=hash_token(raw),
         )
 
-        ingest_url = request.build_absolute_uri(f"/api/ingest/{raw}")
+        ingest_url = request.build_absolute_uri(f"/api/ingest/{ep.id}")
         return Response(
             {
                 "endpoint": IngestEndpointSerializer(ep).data,
-                "token": raw,
+                "ingest_key": raw,
                 "ingest_url": ingest_url,
             },
             status=201,
