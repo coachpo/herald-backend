@@ -4,6 +4,7 @@ from .ingest import ingest_view
 from .views_auth import (
     ChangeEmailView,
     ChangePasswordView,
+    DeleteAccountView,
     ForgotPasswordView,
     LoginView,
     LogoutView,
@@ -41,7 +42,8 @@ urlpatterns = [
     path("auth/reset-password", ResetPasswordView.as_view()),
     path("auth/change-email", ChangeEmailView.as_view()),
     path("auth/change-password", ChangePasswordView.as_view()),
-    path("ingest/<str:token>", ingest_view),
+    path("auth/delete-account", DeleteAccountView.as_view()),
+    path("ingest/<uuid:endpoint_id>", ingest_view),
     path("ingest-endpoints", IngestEndpointsView.as_view()),
     path("ingest-endpoints/<uuid:id>/revoke", IngestEndpointRevokeView.as_view()),
     path("messages", MessagesView.as_view()),

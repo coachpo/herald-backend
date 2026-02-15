@@ -20,10 +20,15 @@ class IngestTests(TestCase):
         user.save(update_fields=["email_verified_at"])
 
         raw = "test-token"
-        IngestEndpoint.objects.create(user=user, name="ep", token_hash=hash_token(raw))
+        ep = IngestEndpoint.objects.create(
+            user=user, name="ep", token_hash=hash_token(raw)
+        )
 
         resp = self.client.post(
-            f"/api/ingest/{raw}", data=b"01234567890", content_type="text/plain"
+            f"/api/ingest/{ep.id}",
+            data=b"01234567890",
+            content_type="text/plain",
+            HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 413)
         self.assertEqual(Message.objects.count(), 0)
@@ -35,10 +40,15 @@ class IngestTests(TestCase):
         user.save(update_fields=["email_verified_at"])
 
         raw = "test-token"
-        IngestEndpoint.objects.create(user=user, name="ep", token_hash=hash_token(raw))
+        ep = IngestEndpoint.objects.create(
+            user=user, name="ep", token_hash=hash_token(raw)
+        )
 
         resp = self.client.post(
-            f"/api/ingest/{raw}", data=b"\xff", content_type="text/plain"
+            f"/api/ingest/{ep.id}",
+            data=b"\xff",
+            content_type="text/plain",
+            HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(Message.objects.count(), 0)
@@ -48,12 +58,76 @@ class IngestTests(TestCase):
         user = User.objects.create_user(email="a@example.com", password="password123")
 
         raw = "test-token"
-        IngestEndpoint.objects.create(user=user, name="ep", token_hash=hash_token(raw))
+        ep = IngestEndpoint.objects.create(
+            user=user, name="ep", token_hash=hash_token(raw)
+        )
 
         resp = self.client.post(
-            f"/api/ingest/{raw}", data=b"hello", content_type="text/plain"
+            f"/api/ingest/{ep.id}",
+            data=b"hello",
+            content_type="text/plain",
+            HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 403)
+        self.assertEqual(Message.objects.count(), 0)
+
+    @override_settings(MAX_INGEST_BYTES=10, REQUIRE_VERIFIED_EMAIL_FOR_INGEST=True)
+    def test_ingest_rejects_missing_key_header(self):
+        user = User.objects.create_user(email="a@example.com", password="password123")
+        user.email_verified_at = timezone.now()
+        user.save(update_fields=["email_verified_at"])
+
+        raw = "test-token"
+        ep = IngestEndpoint.objects.create(
+            user=user, name="ep", token_hash=hash_token(raw)
+        )
+
+        resp = self.client.post(
+            f"/api/ingest/{ep.id}", data=b"hello", content_type="text/plain"
+        )
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(Message.objects.count(), 0)
+
+    @override_settings(MAX_INGEST_BYTES=10, REQUIRE_VERIFIED_EMAIL_FOR_INGEST=True)
+    def test_ingest_rejects_wrong_key_header(self):
+        user = User.objects.create_user(email="a@example.com", password="password123")
+        user.email_verified_at = timezone.now()
+        user.save(update_fields=["email_verified_at"])
+
+        raw = "test-token"
+        ep = IngestEndpoint.objects.create(
+            user=user, name="ep", token_hash=hash_token(raw)
+        )
+
+        resp = self.client.post(
+            f"/api/ingest/{ep.id}",
+            data=b"hello",
+            content_type="text/plain",
+            HTTP_X_BEACON_INGEST_KEY="wrong",
+        )
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(Message.objects.count(), 0)
+
+    @override_settings(MAX_INGEST_BYTES=10, REQUIRE_VERIFIED_EMAIL_FOR_INGEST=True)
+    def test_ingest_rejects_revoked_endpoint(self):
+        user = User.objects.create_user(email="a@example.com", password="password123")
+        user.email_verified_at = timezone.now()
+        user.save(update_fields=["email_verified_at"])
+
+        raw = "test-token"
+        ep = IngestEndpoint.objects.create(
+            user=user, name="ep", token_hash=hash_token(raw)
+        )
+        ep.revoked_at = timezone.now()
+        ep.save(update_fields=["revoked_at"])
+
+        resp = self.client.post(
+            f"/api/ingest/{ep.id}",
+            data=b"hello",
+            content_type="text/plain",
+            HTTP_X_BEACON_INGEST_KEY=raw,
+        )
+        self.assertEqual(resp.status_code, 401)
         self.assertEqual(Message.objects.count(), 0)
 
     @override_settings(MAX_INGEST_BYTES=10, REQUIRE_VERIFIED_EMAIL_FOR_INGEST=True)
@@ -68,10 +142,10 @@ class IngestTests(TestCase):
         )
 
         resp = self.client.post(
-            f"/api/ingest/{raw}",
+            f"/api/ingest/{ep.id}",
             data=b"hello",
             content_type="text/plain",
-            HTTP_AUTHORIZATION="secret",
+            HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(Message.objects.count(), 1)
@@ -80,7 +154,17 @@ class IngestTests(TestCase):
         self.assertEqual(msg.user_id, user.id)
         self.assertEqual(msg.ingest_endpoint_id, ep.id)
         self.assertEqual(msg.payload_text, "hello")
-        self.assertEqual(msg.headers_json.get("Authorization"), "[REDACTED]")
+        self.assertEqual(
+            next(
+                (
+                    v
+                    for k, v in msg.headers_json.items()
+                    if k.lower() == "x-beacon-ingest-key"
+                ),
+                None,
+            ),
+            "[REDACTED]",
+        )
 
 
 class EmailFailureTests(TestCase):

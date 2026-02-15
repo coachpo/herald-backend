@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -19,26 +20,32 @@ def _json_error(*, code: str, message: str, status: int, details: dict | None = 
 
 
 @csrf_exempt
-def ingest_view(request, token: str):
+def ingest_view(request, endpoint_id):
     if request.method != "POST":
         return JsonResponse(
             {"code": "method_not_allowed", "message": "method not allowed"}, status=405
         )
 
-    token_hash = hash_token(token)
     try:
-        endpoint = IngestEndpoint.objects.select_related("user").get(
-            token_hash=token_hash
-        )
+        endpoint = IngestEndpoint.objects.select_related("user").get(id=endpoint_id)
     except IngestEndpoint.DoesNotExist:
-        return _json_error(
-            code="invalid_token", message="invalid or revoked token", status=401
-        )
+        return _json_error(code="not_authenticated", message="unauthorized", status=401)
+
+    raw_key = (request.headers.get("X-Beacon-Ingest-Key") or "").strip()
+    if not raw_key:
+        return _json_error(code="not_authenticated", message="unauthorized", status=401)
+
+    token_hash = hash_token(raw_key)
+    try:
+        if not hmac.compare_digest(token_hash, endpoint.token_hash):
+            return _json_error(
+                code="not_authenticated", message="unauthorized", status=401
+            )
+    except Exception:
+        return _json_error(code="not_authenticated", message="unauthorized", status=401)
 
     if endpoint.revoked_at is not None:
-        return _json_error(
-            code="invalid_token", message="invalid or revoked token", status=401
-        )
+        return _json_error(code="not_authenticated", message="unauthorized", status=401)
 
     user = endpoint.user
     if not user.is_active:
