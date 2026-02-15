@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any, cast
 
 from django.db import IntegrityError
 from django.db.utils import OperationalError
 from django.http import HttpRequest
 from django.utils import timezone
+from rest_framework import serializers
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -40,7 +42,21 @@ from .serializers import (
 )
 
 
+class RefreshRequestSerializer(serializers.Serializer):
+    refresh_token = serializers.CharField()
+
+
+class LogoutRequestSerializer(serializers.Serializer):
+    refresh_token = serializers.CharField(required=False, allow_blank=True)
+
+
 logger = logging.getLogger(__name__)
+
+
+_UserModel = cast(Any, User)
+_EmailVerificationTokenModel = cast(Any, EmailVerificationToken)
+_PasswordResetTokenModel = cast(Any, PasswordResetToken)
+_IngestEndpointModel = cast(Any, IngestEndpoint)
 
 
 def _client_ip(req: HttpRequest) -> str | None:
@@ -49,29 +65,6 @@ def _client_ip(req: HttpRequest) -> str | None:
 
 def _user_agent(req: HttpRequest) -> str | None:
     return req.META.get("HTTP_USER_AGENT")
-
-
-def _set_refresh_cookie(resp: Response, raw_refresh: str):
-    from django.conf import settings
-
-    resp.set_cookie(
-        settings.JWT_REFRESH_COOKIE_NAME,
-        raw_refresh,
-        max_age=int(settings.JWT_REFRESH_TTL_SECONDS),
-        httponly=True,
-        secure=bool(settings.JWT_REFRESH_COOKIE_SECURE),
-        samesite=settings.JWT_REFRESH_COOKIE_SAMESITE,
-        path="/api/auth/refresh",
-    )
-
-
-def _clear_refresh_cookie(resp: Response):
-    from django.conf import settings
-
-    resp.delete_cookie(
-        settings.JWT_REFRESH_COOKIE_NAME,
-        path="/api/auth/refresh",
-    )
 
 
 class SignupView(APIView):
@@ -92,9 +85,10 @@ class SignupView(APIView):
             )
 
         try:
-            user = User.objects.create_user(
-                email=ser.validated_data["email"],
-                password=ser.validated_data["password"],
+            data = cast(dict[str, Any], ser.validated_data)
+            user = _UserModel.objects.create_user(
+                email=data.get("email"),
+                password=data.get("password"),
             )
         except IntegrityError:
             return api_error(
@@ -112,6 +106,7 @@ class SignupView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes: list = []
 
     def post(self, request):
         ser = LoginRequestSerializer(data=request.data)
@@ -123,11 +118,12 @@ class LoginView(APIView):
                 details=ser.errors,
             )
 
-        email = ser.validated_data["email"].strip().lower()
-        password = ser.validated_data["password"]
+        data = cast(dict[str, Any], ser.validated_data)
+        email = str(data.get("email") or "").strip().lower()
+        password = str(data.get("password") or "")
         try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
+            user = _UserModel.objects.get(email=email)
+        except _UserModel.DoesNotExist:
             return api_error(
                 code="invalid_credentials", message="invalid credentials", status=401
             )
@@ -144,19 +140,33 @@ class LoginView(APIView):
             user_agent=_user_agent(request._request),
         )
         resp = Response(
-            {"access_token": access, "user": UserSerializer(user).data}, status=200
+            {
+                "access_token": access,
+                "refresh_token": raw_refresh,
+                "user": UserSerializer(user).data,
+            },
+            status=200,
         )
-        _set_refresh_cookie(resp, raw_refresh)
+        resp["Cache-Control"] = "no-store"
         return resp
 
 
 class RefreshView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes: list = []
 
     def post(self, request):
-        from django.conf import settings
+        ser = RefreshRequestSerializer(data=request.data)
+        if not ser.is_valid():
+            return api_error(
+                code="validation_error",
+                message="invalid request",
+                status=400,
+                details=ser.errors,
+            )
 
-        raw = request.COOKIES.get(settings.JWT_REFRESH_COOKIE_NAME)
+        data = cast(dict[str, Any], ser.validated_data)
+        raw = str(data.get("refresh_token") or "").strip()
         if not raw:
             return api_error(
                 code="not_authenticated", message="missing refresh token", status=401
@@ -166,6 +176,8 @@ class RefreshView(APIView):
         try:
             # SQLite can throw transient "database is locked" under concurrent
             # refresh + worker writes. Small retries avoid returning 500s.
+            new_raw: str | None = None
+            rt = None
             for attempt in range(3):
                 try:
                     new_raw, rt = rotate_refresh_token(
@@ -180,36 +192,53 @@ class RefreshView(APIView):
                         continue
                     raise
         except ValueError:
-            resp = api_error(
+            return api_error(
                 code="not_authenticated", message="invalid refresh token", status=401
             )
-            _clear_refresh_cookie(resp)
-            return resp
         except OperationalError as e:
             logger.exception("refresh_db_locked", extra={"err": str(e)})
             return api_error(
                 code="temporarily_unavailable", message="try again", status=503
             )
 
-        access = issue_access_token(rt.user)
+        if not rt or not new_raw:
+            return api_error(
+                code="temporarily_unavailable", message="try again", status=503
+            )
+
+        rt_user = cast(Any, rt).user
+        access = issue_access_token(rt_user)
         resp = Response(
-            {"access_token": access, "user": UserSerializer(rt.user).data}, status=200
+            {
+                "access_token": access,
+                "refresh_token": new_raw,
+                "user": UserSerializer(rt_user).data,
+            },
+            status=200,
         )
-        _set_refresh_cookie(resp, new_raw)
+        resp["Cache-Control"] = "no-store"
         return resp
 
 
 class LogoutView(APIView):
-    def post(self, request):
-        from django.conf import settings
+    permission_classes = [AllowAny]
+    authentication_classes: list = []
 
-        raw = request.COOKIES.get(settings.JWT_REFRESH_COOKIE_NAME)
+    def post(self, request):
+        ser = LogoutRequestSerializer(data=request.data)
+        if not ser.is_valid():
+            return api_error(
+                code="validation_error",
+                message="invalid request",
+                status=400,
+                details=ser.errors,
+            )
+
+        data = cast(dict[str, Any], ser.validated_data)
+        raw = str(data.get("refresh_token") or "").strip()
         if raw:
             revoke_refresh_token(token_hash=hash_token(raw), reason="logout")
-
-        resp = Response(status=204)
-        _clear_refresh_cookie(resp)
-        return resp
+        return Response(status=204)
 
 
 class MeView(APIView):
@@ -250,13 +279,14 @@ class VerifyEmailView(APIView):
                 details=ser.errors,
             )
 
-        token_hash = hash_token(ser.validated_data["token"])
+        data = cast(dict[str, Any], ser.validated_data)
+        token_hash = hash_token(str(data.get("token") or ""))
         now = timezone.now()
         try:
-            tok = EmailVerificationToken.objects.select_related("user").get(
+            tok = _EmailVerificationTokenModel.objects.select_related("user").get(
                 token_hash=token_hash
             )
-        except EmailVerificationToken.DoesNotExist:
+        except _EmailVerificationTokenModel.DoesNotExist:
             return api_error(
                 code="invalid_token", message="invalid or expired token", status=400
             )
@@ -287,14 +317,15 @@ class ForgotPasswordView(APIView):
                 details=ser.errors,
             )
 
-        email = ser.validated_data["email"].strip().lower()
+        data = cast(dict[str, Any], ser.validated_data)
+        email = str(data.get("email") or "").strip().lower()
         ip = _client_ip(request._request) or ""
         if not allow_rate(key=f"fp:{ip}", limit=10, window_seconds=3600):
             return Response(status=204)
 
         try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
+            user = _UserModel.objects.get(email=email)
+        except _UserModel.DoesNotExist:
             return Response(status=204)
         if not user.is_active:
             return Response(status=204)
@@ -322,13 +353,14 @@ class ResetPasswordView(APIView):
                 details=ser.errors,
             )
 
-        token_hash = hash_token(ser.validated_data["token"])
+        data = cast(dict[str, Any], ser.validated_data)
+        token_hash = hash_token(str(data.get("token") or ""))
         now = timezone.now()
         try:
-            tok = PasswordResetToken.objects.select_related("user").get(
+            tok = _PasswordResetTokenModel.objects.select_related("user").get(
                 token_hash=token_hash
             )
-        except PasswordResetToken.DoesNotExist:
+        except _PasswordResetTokenModel.DoesNotExist:
             return api_error(
                 code="invalid_token", message="invalid or expired token", status=400
             )
@@ -339,7 +371,7 @@ class ResetPasswordView(APIView):
             )
 
         user = tok.user
-        user.set_password(ser.validated_data["new_password"])
+        user.set_password(str(data.get("new_password") or ""))
         user.save(update_fields=["password"])
         tok.used_at = now
         tok.save(update_fields=["used_at"])
@@ -359,8 +391,9 @@ class ChangeEmailView(APIView):
             )
 
         user: User = request.user
-        user.email = ser.validated_data["new_email"].strip().lower()
-        user.email_verified_at = None
+        data = cast(dict[str, Any], ser.validated_data)
+        user.email = str(data.get("new_email") or "").strip().lower()
+        setattr(user, "email_verified_at", None)
         try:
             user.save(update_fields=["email", "email_verified_at"])
         except IntegrityError:
@@ -390,12 +423,13 @@ class ChangePasswordView(APIView):
             )
 
         user: User = request.user
-        if not user.check_password(ser.validated_data["old_password"]):
+        data = cast(dict[str, Any], ser.validated_data)
+        if not user.check_password(str(data.get("old_password") or "")):
             return api_error(
                 code="invalid_credentials", message="invalid credentials", status=401
             )
 
-        user.set_password(ser.validated_data["new_password"])
+        user.set_password(str(data.get("new_password") or ""))
         user.save(update_fields=["password"])
         revoke_all_refresh_tokens(user=user, reason="password_changed")
         return Response(status=204)
@@ -413,27 +447,25 @@ class DeleteAccountView(APIView):
             )
 
         user: User = request.user
-        if not user.check_password(ser.validated_data["password"]):
+        data = cast(dict[str, Any], ser.validated_data)
+        if not user.check_password(str(data.get("password") or "")):
             return api_error(
                 code="invalid_credentials", message="invalid credentials", status=401
             )
 
-        email = user.email
+        email = str(getattr(user, "email", ""))
         now = timezone.now()
 
         revoke_all_refresh_tokens(user=user, reason="account_deleted")
-        IngestEndpoint.objects.filter(user=user, revoked_at__isnull=True).update(
+        _IngestEndpointModel.objects.filter(user=user, revoked_at__isnull=True).update(
             revoked_at=now
         )
 
         user.delete()
-
-        resp = Response(status=204)
-        _clear_refresh_cookie(resp)
 
         try:
             send_account_deleted_email(email=email, deleted_at=now)
         except EmailSendError:
             logger.exception("account_deleted_email_failed", extra={"email": email})
 
-        return resp
+        return Response(status=204)

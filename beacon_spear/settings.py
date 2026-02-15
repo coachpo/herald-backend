@@ -232,11 +232,6 @@ TOKEN_HASH_KEY = os.environ.get("TOKEN_HASH_KEY", "")
 JWT_SIGNING_KEY = os.environ.get("JWT_SIGNING_KEY", SECRET_KEY)
 JWT_ACCESS_TTL_SECONDS = int(os.environ.get("JWT_ACCESS_TTL_SECONDS", "900"))
 JWT_REFRESH_TTL_SECONDS = int(os.environ.get("JWT_REFRESH_TTL_SECONDS", "2592000"))
-JWT_REFRESH_COOKIE_NAME = os.environ.get("JWT_REFRESH_COOKIE_NAME", "beacon_refresh")
-JWT_REFRESH_COOKIE_SECURE = (
-    os.environ.get("JWT_REFRESH_COOKIE_SECURE", "true").lower() == "true"
-)
-JWT_REFRESH_COOKIE_SAMESITE = os.environ.get("JWT_REFRESH_COOKIE_SAMESITE", "Strict")
 
 REQUIRE_VERIFIED_EMAIL_FOR_INGEST = (
     os.environ.get("REQUIRE_VERIFIED_EMAIL_FOR_INGEST", "true").lower() == "true"

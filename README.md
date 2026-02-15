@@ -24,4 +24,4 @@ python manage.py deliveries_worker
 
 - APIs are served under `/api/*`.
 - Ingest endpoint: `POST /api/ingest/{token}`.
-- Dashboard auth uses JWT access tokens (`Authorization: Bearer ...`) and an HttpOnly refresh cookie.
+- Dashboard auth uses JWT access tokens (`Authorization: Bearer ...`) and a refresh token returned in JSON (rotated on refresh).

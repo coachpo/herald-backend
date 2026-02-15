@@ -1,12 +1,17 @@
-from django.conf import settings
 from django.test import TestCase
 from rest_framework.test import APIClient
 from unittest.mock import patch
+
+from typing import Any, cast
 
 from accounts.jwt import issue_access_token
 from accounts.models import User
 from accounts.tokens import hash_token
 from beacon.models import IngestEndpoint, Message
+
+
+_IngestEndpointModel = cast(Any, IngestEndpoint)
+_MessageModel = cast(Any, Message)
 
 
 class DeleteAccountTests(TestCase):
@@ -18,10 +23,10 @@ class DeleteAccountTests(TestCase):
         access = issue_access_token(user)
 
         raw = "test-token"
-        ep = IngestEndpoint.objects.create(
+        ep = _IngestEndpointModel.objects.create(
             user=user, name="ep", token_hash=hash_token(raw)
         )
-        Message.objects.create(
+        _MessageModel.objects.create(
             user=user,
             ingest_endpoint=ep,
             content_type="text/plain",
@@ -34,7 +39,7 @@ class DeleteAccountTests(TestCase):
         )
 
         with patch("accounts.emails.send_mail"):
-            resp = self.client.post(
+            resp: Any = self.client.post(
                 "/api/auth/delete-account",
                 data={"password": "password123", "confirm": "DELETE"},
                 format="json",
@@ -43,17 +48,17 @@ class DeleteAccountTests(TestCase):
 
         self.assertEqual(resp.status_code, 204)
         self.assertFalse(User.objects.filter(id=user.id).exists())
-        self.assertEqual(IngestEndpoint.objects.count(), 0)
-        self.assertEqual(Message.objects.count(), 0)
+        self.assertEqual(_IngestEndpointModel.objects.count(), 0)
+        self.assertEqual(_MessageModel.objects.count(), 0)
 
-        self.assertIn(settings.JWT_REFRESH_COOKIE_NAME, resp.cookies)
+        self.assertEqual(len(resp.cookies), 0)
 
     def test_delete_account_rejects_wrong_password(self):
         user = User.objects.create_user(email="a@example.com", password="password123")
         access = issue_access_token(user)
 
         with patch("accounts.emails.send_mail"):
-            resp = self.client.post(
+            resp: Any = self.client.post(
                 "/api/auth/delete-account",
                 data={"password": "wrong", "confirm": "DELETE"},
                 format="json",
@@ -67,7 +72,7 @@ class DeleteAccountTests(TestCase):
         access = issue_access_token(user)
 
         with patch("accounts.emails.send_mail"):
-            resp = self.client.post(
+            resp: Any = self.client.post(
                 "/api/auth/delete-account",
                 data={"password": "password123", "confirm": "nope"},
                 format="json",
@@ -81,7 +86,7 @@ class DeleteAccountTests(TestCase):
         access = issue_access_token(user)
 
         with patch("accounts.emails.send_mail", side_effect=Exception("smtp")):
-            resp = self.client.post(
+            resp: Any = self.client.post(
                 "/api/auth/delete-account",
                 data={"password": "password123", "confirm": "DELETE"},
                 format="json",
