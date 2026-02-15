@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from django.db import IntegrityError
+from django.db.utils import OperationalError
 from django.http import HttpRequest
 from django.utils import timezone
 from rest_framework.permissions import AllowAny
@@ -159,17 +161,32 @@ class RefreshView(APIView):
 
         token_hash = hash_token(raw)
         try:
-            new_raw, rt = rotate_refresh_token(
-                token_hash=token_hash,
-                ip=_client_ip(request._request),
-                user_agent=_user_agent(request._request),
-            )
+            # SQLite can throw transient "database is locked" under concurrent
+            # refresh + worker writes. Small retries avoid returning 500s.
+            for attempt in range(3):
+                try:
+                    new_raw, rt = rotate_refresh_token(
+                        token_hash=token_hash,
+                        ip=_client_ip(request._request),
+                        user_agent=_user_agent(request._request),
+                    )
+                    break
+                except OperationalError as e:
+                    if "database is locked" in str(e).lower() and attempt < 2:
+                        time.sleep(0.05 * (2**attempt))
+                        continue
+                    raise
         except ValueError:
             resp = api_error(
                 code="not_authenticated", message="invalid refresh token", status=401
             )
             _clear_refresh_cookie(resp)
             return resp
+        except OperationalError as e:
+            logger.exception("refresh_db_locked", extra={"err": str(e)})
+            return api_error(
+                code="temporarily_unavailable", message="try again", status=503
+            )
 
         access = issue_access_token(rt.user)
         resp = Response(

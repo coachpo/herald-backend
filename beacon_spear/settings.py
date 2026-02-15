@@ -12,11 +12,53 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 from pathlib import Path
-
-import dj_database_url
+from typing import Any, cast
+from urllib.parse import parse_qs, unquote, urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _parse_database_url(url: str) -> dict[str, Any]:
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").split("+", 1)[0].lower()
+
+    if scheme in {"postgres", "postgresql"}:
+        name = unquote((parsed.path or "").lstrip("/"))
+        out: dict[str, Any] = {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": name,
+            "USER": unquote(parsed.username or ""),
+            "PASSWORD": unquote(parsed.password or ""),
+            "HOST": parsed.hostname or "",
+            "PORT": str(parsed.port or ""),
+            "CONN_MAX_AGE": 60,
+        }
+        qs = parse_qs(parsed.query or "")
+        sslmode = (qs.get("sslmode") or [""])[0]
+        if sslmode:
+            out.setdefault("OPTIONS", {})
+            out["OPTIONS"]["sslmode"] = sslmode
+        return out
+
+    if scheme in {"sqlite", "sqlite3"}:
+        path = unquote(parsed.path or "")
+        if path in {":memory:", "/:memory:"}:
+            name = ":memory:"
+        elif path.startswith("//"):
+            # sqlite:////absolute/path.db -> urlparse(path='//absolute/path.db')
+            name = path[1:]
+        elif path.startswith("/"):
+            # sqlite:///relative/path.db
+            name = path[1:]
+        else:
+            name = path
+        return {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": name,
+        }
+
+    raise ValueError(f"unsupported_database_scheme:{scheme}")
 
 
 def _load_env_file(path: Path):
@@ -110,11 +152,41 @@ DATABASES = {
     }
 }
 
+default_db = cast(dict[str, Any], DATABASES["default"])
+
 if os.environ.get("DATABASE_URL"):
-    DATABASES["default"] = dj_database_url.parse(
-        os.environ["DATABASE_URL"],
-        conn_max_age=60,
+    DATABASES["default"] = cast(
+        dict[str, Any], _parse_database_url(os.environ["DATABASE_URL"])
     )
+    default_db = cast(dict[str, Any], DATABASES["default"])
+
+# SQLite is fine for single-process local dev, but this repo runs a web process
+# plus a worker process. Add reasonable defaults to reduce "database is locked"
+# errors for SQLite-backed dev.
+if DATABASES.get("default", {}).get("ENGINE") == "django.db.backends.sqlite3":
+    timeout = int(os.environ.get("SQLITE_TIMEOUT_SECONDS", "30"))
+    default_db.setdefault("OPTIONS", {})
+    cast(dict[str, Any], default_db["OPTIONS"]).setdefault("timeout", timeout)
+
+    try:
+        from django.db.backends.signals import connection_created
+
+        def _sqlite_connection_pragmas(sender, connection, **kwargs):
+            name = str(connection.settings_dict.get("NAME") or "")
+            # Skip in-memory DBs (used by Django test runner).
+            if name == ":memory:" or name.startswith("file:memory"):
+                return
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("PRAGMA journal_mode=WAL;")
+                    cursor.execute("PRAGMA synchronous=NORMAL;")
+            except Exception:
+                # Best-effort: if pragmas fail on a platform/FS, don't block startup.
+                return
+
+        connection_created.connect(_sqlite_connection_pragmas)
+    except Exception:
+        pass
 
 
 # Password validation
