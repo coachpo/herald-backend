@@ -52,6 +52,8 @@ urlpatterns = [
     path("auth/delete-account", DeleteAccountView.as_view()),
     path("ingest/<uuidhex:endpoint_id>", ingest_view),
     path("ingest/<uuid:endpoint_id>", ingest_view),
+    path("i/<uuidhex:endpoint_id>", ingest_view),
+    path("i/<uuid:endpoint_id>", ingest_view),
     path("ingest-endpoints", IngestEndpointsView.as_view()),
     path("ingest-endpoints/<uuid:id>/revoke", IngestEndpointRevokeView.as_view()),
     path("ingest-endpoints/<uuid:id>", IngestEndpointArchiveView.as_view()),

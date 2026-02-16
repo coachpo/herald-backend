@@ -19,6 +19,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _env_bool(key: str, default: bool) -> bool:
+    raw = os.environ.get(key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _parse_database_url(url: str) -> dict[str, Any]:
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").split("+", 1)[0].lower()
@@ -236,6 +243,9 @@ JWT_REFRESH_TTL_SECONDS = int(os.environ.get("JWT_REFRESH_TTL_SECONDS", "2592000
 REQUIRE_VERIFIED_EMAIL_FOR_INGEST = (
     os.environ.get("REQUIRE_VERIFIED_EMAIL_FOR_INGEST", "true").lower() == "true"
 )
+
+ALLOW_USER_SIGNUP = _env_bool("ALLOW_USER_SIGNUP", True)
+
 MAX_INGEST_BYTES = int(os.environ.get("MAX_INGEST_BYTES", "1048576"))
 
 DELIVERY_MAX_ATTEMPTS = int(os.environ.get("DELIVERY_MAX_ATTEMPTS", "10"))

@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Any, cast
 
+from django.conf import settings
 from django.db import IntegrityError
 from django.db.utils import OperationalError
 from django.http import HttpRequest
@@ -71,6 +72,11 @@ class SignupView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        if not getattr(settings, "ALLOW_USER_SIGNUP", True):
+            return api_error(
+                code="signup_disabled", message="signup disabled", status=403
+            )
+
         ip = _client_ip(request._request) or ""
         if ip and not allow_rate(key=f"su:{ip}", limit=10, window_seconds=3600):
             return api_error(code="rate_limited", message="try later", status=400)
