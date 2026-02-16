@@ -15,7 +15,7 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+EXPOSE 8100
 
 ENV DJANGO_SETTINGS_MODULE=beacon_spear.settings
 
