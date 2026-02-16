@@ -219,7 +219,7 @@ class MqttChannelConfigSerializer(serializers.Serializer):
 
 class ChannelUpsertRequestSerializer(serializers.Serializer):
     type = serializers.ChoiceField(choices=["bark", "ntfy", "mqtt"])
-    name = serializers.CharField()
+    name = serializers.CharField(max_length=200)
     config = serializers.DictField()
 
     def validate(self, attrs):

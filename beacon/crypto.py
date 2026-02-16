@@ -8,9 +8,13 @@ from django.conf import settings
 
 @lru_cache(maxsize=1)
 def _fernet() -> Fernet:
-    key = getattr(settings, "CHANNEL_CONFIG_ENCRYPTION_KEY", "")
+    key = str(getattr(settings, "CHANNEL_CONFIG_ENCRYPTION_KEY", "") or "").strip()
     if key:
-        return Fernet(key.encode("utf-8"))
+        try:
+            return Fernet(key.encode("utf-8"))
+        except (ValueError, TypeError):
+            derived = hashlib.sha256(key.encode("utf-8")).digest()
+            return Fernet(base64.urlsafe_b64encode(derived))
 
     derived = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
     return Fernet(base64.urlsafe_b64encode(derived))
