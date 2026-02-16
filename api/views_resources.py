@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from typing import Any, cast
 
+import requests
 from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
@@ -18,6 +20,7 @@ from .errors import api_error
 from .permissions import VerifiedEmailForUnsafeMethods
 from .serializers import (
     BatchDeleteRequestSerializer,
+    ChannelTestRequestSerializer,
     ChannelUpsertRequestSerializer,
     ChannelSerializer,
     DeliverySerializer,
@@ -31,11 +34,22 @@ from .serializers import (
 )
 
 
+_ChannelModel = cast(Any, Channel)
+_DeliveryModel = cast(Any, Delivery)
+_ForwardingRuleModel = cast(Any, ForwardingRule)
+_IngestEndpointModel = cast(Any, IngestEndpoint)
+_MessageModel = cast(Any, Message)
+_transaction = cast(Any, transaction)
+
+
 class IngestEndpointsView(APIView):
     permission_classes = [VerifiedEmailForUnsafeMethods]
 
     def get(self, request):
-        eps = IngestEndpoint.objects.filter(user=request.user).order_by("-created_at")
+        eps = _IngestEndpointModel.objects.filter(user=request.user).order_by(
+            "-created_at"
+        )
+        eps = eps.filter(deleted_at__isnull=True)
         return Response(
             {"endpoints": IngestEndpointSerializer(eps, many=True).data}, status=200
         )
@@ -50,14 +64,15 @@ class IngestEndpointsView(APIView):
                 details=ser.errors,
             )
 
+        data = cast(dict[str, Any], ser.validated_data)
         raw = generate_secret_token(32)
-        ep = IngestEndpoint.objects.create(
+        ep = _IngestEndpointModel.objects.create(
             user=request.user,
-            name=ser.validated_data["name"],
+            name=data["name"],
             token_hash=hash_token(raw),
         )
 
-        ingest_url = request.build_absolute_uri(f"/api/ingest/{ep.id}")
+        ingest_url = request.build_absolute_uri(f"/api/ingest/{ep.id.hex}")
         return Response(
             {
                 "endpoint": IngestEndpointSerializer(ep).data,
@@ -73,8 +88,10 @@ class IngestEndpointRevokeView(APIView):
 
     def post(self, request, id: str):
         try:
-            ep = IngestEndpoint.objects.get(user=request.user, id=id)
-        except IngestEndpoint.DoesNotExist:
+            ep = _IngestEndpointModel.objects.get(
+                user=request.user, id=id, deleted_at__isnull=True
+            )
+        except _IngestEndpointModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
 
         if ep.revoked_at is None:
@@ -83,9 +100,29 @@ class IngestEndpointRevokeView(APIView):
         return Response(status=204)
 
 
+class IngestEndpointArchiveView(APIView):
+    permission_classes = [VerifiedEmailForUnsafeMethods]
+
+    def delete(self, request, id: str):
+        try:
+            ep = _IngestEndpointModel.objects.get(
+                user=request.user, id=id, deleted_at__isnull=True
+            )
+        except _IngestEndpointModel.DoesNotExist:
+            return api_error(code="not_found", message="not found", status=404)
+
+        now = timezone.now()
+        if ep.revoked_at is None:
+            ep.revoked_at = now
+        if ep.deleted_at is None:
+            ep.deleted_at = now
+        ep.save(update_fields=["revoked_at", "deleted_at"])
+        return Response(status=204)
+
+
 class MessagesView(APIView):
     def get(self, request):
-        qs = Message.objects.filter(
+        qs = _MessageModel.objects.filter(
             user=request.user, deleted_at__isnull=True
         ).order_by("-received_at")
 
@@ -107,7 +144,7 @@ class MessagesView(APIView):
         messages = list(qs[:500])
         ids = [m.id for m in messages]
         counts = (
-            Delivery.objects.filter(message_id__in=ids)
+            _DeliveryModel.objects.filter(message_id__in=ids)
             .values("message_id", "status")
             .annotate(c=Count("id"))
         )
@@ -129,15 +166,17 @@ class MessageDetailView(APIView):
 
     def get(self, request, id: str):
         try:
-            msg = Message.objects.get(user=request.user, id=id)
-        except Message.DoesNotExist:
+            msg = _MessageModel.objects.get(user=request.user, id=id)
+        except _MessageModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
         return Response({"message": MessageDetailSerializer(msg).data}, status=200)
 
     def delete(self, request, id: str):
         try:
-            msg = Message.objects.get(user=request.user, id=id, deleted_at__isnull=True)
-        except Message.DoesNotExist:
+            msg = _MessageModel.objects.get(
+                user=request.user, id=id, deleted_at__isnull=True
+            )
+        except _MessageModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
         msg.soft_delete()
         return Response(status=204)
@@ -156,18 +195,19 @@ class MessagesBatchDeleteView(APIView):
                 details=ser.errors,
             )
 
-        days = int(ser.validated_data["older_than_days"])
+        data = cast(dict[str, Any], ser.validated_data)
+        days = int(data["older_than_days"])
         cutoff = timezone.now() - timedelta(days=days)
-        qs = Message.objects.filter(
+        qs = _MessageModel.objects.filter(
             user=request.user, deleted_at__isnull=True, received_at__lt=cutoff
         )
 
-        ep_id = ser.validated_data.get("ingest_endpoint_id")
+        ep_id = data.get("ingest_endpoint_id")
         if ep_id:
             qs = qs.filter(ingest_endpoint_id=ep_id)
 
         now = timezone.now()
-        with transaction.atomic():
+        with _transaction.atomic():
             updated = qs.update(deleted_at=now)
 
         return Response({"deleted_count": int(updated)}, status=200)
@@ -177,7 +217,7 @@ class ChannelsView(APIView):
     permission_classes = [VerifiedEmailForUnsafeMethods]
 
     def get(self, request):
-        qs = Channel.objects.filter(user=request.user).order_by("-created_at")
+        qs = _ChannelModel.objects.filter(user=request.user).order_by("-created_at")
         return Response({"channels": ChannelSerializer(qs, many=True).data}, status=200)
 
     def post(self, request):
@@ -190,11 +230,12 @@ class ChannelsView(APIView):
                 details=ser.errors,
             )
 
-        cfg = ser.validated_data["config"]
-        channel = Channel(
+        data = cast(dict[str, Any], ser.validated_data)
+        cfg = data["config"]
+        channel = _ChannelModel(
             user=request.user,
-            type=ser.validated_data["type"],
-            name=ser.validated_data["name"],
+            type=data["type"],
+            name=data["name"],
             config_json_encrypted="",
         )
         channel.config = cfg
@@ -210,8 +251,8 @@ class ChannelDetailView(APIView):
 
     def get(self, request, id: str):
         try:
-            channel = Channel.objects.get(user=request.user, id=id)
-        except Channel.DoesNotExist:
+            channel = _ChannelModel.objects.get(user=request.user, id=id)
+        except _ChannelModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
         return Response(
             {"channel": ChannelSerializer(channel).data, "config": channel.config},
@@ -229,11 +270,12 @@ class ChannelDetailView(APIView):
             )
 
         try:
-            channel = Channel.objects.get(user=request.user, id=id)
-        except Channel.DoesNotExist:
+            channel = _ChannelModel.objects.get(user=request.user, id=id)
+        except _ChannelModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
 
-        if ser.validated_data["type"] != channel.type:
+        data = cast(dict[str, Any], ser.validated_data)
+        if data["type"] != channel.type:
             return api_error(
                 code="validation_error",
                 message="invalid request",
@@ -241,8 +283,8 @@ class ChannelDetailView(APIView):
                 details={"type": ["type_mismatch"]},
             )
 
-        cfg = ser.validated_data["config"]
-        channel.name = ser.validated_data["name"]
+        cfg = data["config"]
+        channel.name = data["name"]
         channel.config = cfg
         channel.save(update_fields=["name", "config_json_encrypted"])
 
@@ -251,17 +293,214 @@ class ChannelDetailView(APIView):
         )
 
     def delete(self, request, id: str):
-        deleted, _ = Channel.objects.filter(user=request.user, id=id).delete()
+        deleted, _ = _ChannelModel.objects.filter(user=request.user, id=id).delete()
         if not deleted:
             return api_error(code="not_found", message="not found", status=404)
         return Response(status=204)
+
+
+class ChannelTestView(APIView):
+    permission_classes = [VerifiedEmailForUnsafeMethods]
+
+    def post(self, request, id: str):
+        ser = ChannelTestRequestSerializer(data=request.data)
+        if not ser.is_valid():
+            return api_error(
+                code="validation_error",
+                message="invalid request",
+                status=400,
+                details=ser.errors,
+            )
+
+        try:
+            channel = _ChannelModel.objects.get(user=request.user, id=id)
+        except _ChannelModel.DoesNotExist:
+            return api_error(code="not_found", message="not found", status=404)
+
+        data = cast(dict[str, Any], ser.validated_data)
+        title = str(data.get("title") or "").strip() or None
+        body = str(data.get("body") or "").strip() or None
+        payload_json = data.get("payload_json")
+        if not body and payload_json is None:
+            body = "Test notification from Beacon Spear"
+
+        t = str(channel.type or "").strip()
+        try:
+            if t == "bark":
+                from beacon.bark import send_bark_push
+
+                cfg = channel.config
+                server_base_url = str(cfg.get("server_base_url") or "").strip()
+                if not server_base_url:
+                    raise ValueError("missing_server_base_url")
+
+                payload: dict = {}
+                default_payload = cfg.get("default_payload_json")
+                if isinstance(default_payload, dict):
+                    payload.update(default_payload)
+                if isinstance(payload_json, dict):
+                    payload.update(payload_json)
+                if title is not None:
+                    payload["title"] = title
+                payload.setdefault("title", "Beacon Spear test")
+                if body is not None:
+                    payload["body"] = body
+                payload.setdefault("body", "Test notification from Beacon Spear")
+
+                if cfg.get("device_key") is not None:
+                    payload["device_key"] = cfg.get("device_key")
+                if cfg.get("device_keys") is not None:
+                    payload["device_keys"] = cfg.get("device_keys")
+
+                ok, meta = send_bark_push(
+                    server_base_url=server_base_url, payload=payload
+                )
+            elif t == "ntfy":
+                from beacon.ntfy import send_ntfy_publish
+                from urllib.parse import urljoin
+                from django.conf import settings
+
+                from beacon.ssrf import assert_ssrf_safe
+
+                cfg = channel.config
+                server_base_url = str(cfg.get("server_base_url") or "").strip()
+                topic = str(cfg.get("topic") or "").strip()
+                if not server_base_url:
+                    raise ValueError("missing_server_base_url")
+                if not topic:
+                    raise ValueError("missing_topic")
+
+                base = server_base_url.rstrip("/") + "/"
+                url = urljoin(base, str(topic).lstrip("/"))
+                block_private = bool(
+                    getattr(settings, "NTFY_BLOCK_PRIVATE_NETWORKS", True)
+                )
+                assert_ssrf_safe(url, block_private_networks=block_private)
+
+                headers: dict[str, str] = {}
+                default_headers = cfg.get("default_headers_json")
+                if isinstance(default_headers, dict):
+                    for k, v in default_headers.items():
+                        kk = str(k).strip()
+                        if not kk:
+                            continue
+                        if v is None:
+                            continue
+                        if isinstance(v, bool):
+                            vv = "true" if v else "false"
+                        else:
+                            vv = str(v).strip()
+                        if vv:
+                            headers[kk] = vv
+
+                if title is not None:
+                    headers.setdefault("Title", title)
+                headers.setdefault("Title", "Beacon Spear test")
+
+                token = str(cfg.get("access_token") or "").strip()
+                if token:
+                    headers.setdefault("Authorization", f"Bearer {token}")
+
+                username = str(cfg.get("username") or "").strip()
+                password = str(cfg.get("password") or "").strip()
+                auth = (
+                    (username, password)
+                    if username and password and not token
+                    else None
+                )
+
+                body_text = body or "Test notification from Beacon Spear"
+                ok, meta = send_ntfy_publish(
+                    url=url,
+                    body=body_text.encode("utf-8"),
+                    headers=headers,
+                    auth=auth,
+                )
+            elif t == "mqtt":
+                from beacon.mqtt import send_mqtt_publish
+
+                cfg = channel.config
+                broker_host = str(cfg.get("broker_host") or "").strip()
+                broker_port = int(cfg.get("broker_port") or 1883)
+                topic = str(cfg.get("topic") or "").strip()
+                username = str(cfg.get("username") or "").strip() or None
+                password = str(cfg.get("password") or "") if username else None
+                qos = int(cfg.get("qos") or 0)
+                retain = bool(cfg.get("retain") or False)
+                tls = bool(cfg.get("tls") or False)
+                tls_insecure = bool(cfg.get("tls_insecure") or False)
+                client_id = str(cfg.get("client_id") or "").strip() or None
+                keepalive = int(cfg.get("keepalive_seconds") or 60)
+
+                payload_obj: object
+                if isinstance(payload_json, dict):
+                    payload_obj = payload_json
+                else:
+                    payload_obj = body or "Test notification from Beacon Spear"
+
+                ok, meta = send_mqtt_publish(
+                    broker_host=broker_host,
+                    broker_port=broker_port,
+                    topic=topic,
+                    payload=payload_obj,
+                    username=username,
+                    password=password,
+                    qos=qos,
+                    retain=retain,
+                    tls=tls,
+                    tls_insecure=tls_insecure,
+                    client_id=client_id,
+                    keepalive_seconds=keepalive,
+                )
+            else:
+                return api_error(
+                    code="validation_error",
+                    message="invalid channel type",
+                    status=400,
+                    details={"type": ["unsupported_channel_type"]},
+                )
+        except ValueError as e:
+            return api_error(
+                code="validation_error",
+                message="invalid channel config",
+                status=400,
+                details={"error": str(e)},
+            )
+        except requests.RequestException as e:
+            return api_error(
+                code="channel_test_failed",
+                message="send failed",
+                status=502,
+                details={"error": str(e)},
+            )
+        except Exception as e:
+            return api_error(
+                code="channel_test_failed",
+                message="send failed",
+                status=502,
+                details={"error": str(e)},
+            )
+
+        meta = dict(meta)
+        meta.setdefault("provider", t)
+        return Response(
+            {
+                "ok": bool(ok),
+                "channel_id": str(channel.id),
+                "channel_type": t,
+                "provider_response": meta,
+            },
+            status=200,
+        )
 
 
 class RulesView(APIView):
     permission_classes = [VerifiedEmailForUnsafeMethods]
 
     def get(self, request):
-        qs = ForwardingRule.objects.filter(user=request.user).order_by("-created_at")
+        qs = _ForwardingRuleModel.objects.filter(user=request.user).order_by(
+            "-created_at"
+        )
         return Response({"rules": RuleSerializer(qs, many=True).data}, status=200)
 
     def post(self, request):
@@ -274,25 +513,22 @@ class RulesView(APIView):
                 details=ser.errors,
             )
 
+        data = cast(dict[str, Any], ser.validated_data)
         try:
-            channel = Channel.objects.get(
-                user=request.user, id=ser.validated_data["channel_id"]
+            channel = _ChannelModel.objects.get(
+                user=request.user, id=data["channel_id"]
             )
-        except Channel.DoesNotExist:
+        except _ChannelModel.DoesNotExist:
             return api_error(code="not_found", message="channel not found", status=404)
 
-        tpl = (
-            ser.validated_data.get("payload_template")
-            or ser.validated_data.get("bark_payload_template")
-            or {}
-        )
+        tpl = data.get("payload_template") or data.get("bark_payload_template") or {}
 
-        rule = ForwardingRule.objects.create(
+        rule = _ForwardingRuleModel.objects.create(
             user=request.user,
-            name=ser.validated_data["name"],
-            enabled=ser.validated_data["enabled"],
+            name=data["name"],
+            enabled=data["enabled"],
             channel=channel,
-            filter_json=ser.validated_data.get("filter") or {},
+            filter_json=data.get("filter") or {},
             bark_payload_template_json=tpl,
             payload_template_json=tpl,
         )
@@ -304,8 +540,8 @@ class RuleDetailView(APIView):
 
     def get(self, request, id: str):
         try:
-            rule = ForwardingRule.objects.get(user=request.user, id=id)
-        except ForwardingRule.DoesNotExist:
+            rule = _ForwardingRuleModel.objects.get(user=request.user, id=id)
+        except _ForwardingRuleModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
         return Response({"rule": RuleSerializer(rule).data}, status=200)
 
@@ -320,27 +556,24 @@ class RuleDetailView(APIView):
             )
 
         try:
-            rule = ForwardingRule.objects.get(user=request.user, id=id)
-        except ForwardingRule.DoesNotExist:
+            rule = _ForwardingRuleModel.objects.get(user=request.user, id=id)
+        except _ForwardingRuleModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
 
+        data = cast(dict[str, Any], ser.validated_data)
         try:
-            channel = Channel.objects.get(
-                user=request.user, id=ser.validated_data["channel_id"]
+            channel = _ChannelModel.objects.get(
+                user=request.user, id=data["channel_id"]
             )
-        except Channel.DoesNotExist:
+        except _ChannelModel.DoesNotExist:
             return api_error(code="not_found", message="channel not found", status=404)
 
-        tpl = (
-            ser.validated_data.get("payload_template")
-            or ser.validated_data.get("bark_payload_template")
-            or {}
-        )
+        tpl = data.get("payload_template") or data.get("bark_payload_template") or {}
 
-        rule.name = ser.validated_data["name"]
-        rule.enabled = ser.validated_data["enabled"]
+        rule.name = data["name"]
+        rule.enabled = data["enabled"]
         rule.channel = channel
-        rule.filter_json = ser.validated_data.get("filter") or {}
+        rule.filter_json = data.get("filter") or {}
         rule.bark_payload_template_json = tpl
         rule.payload_template_json = tpl
         rule.save()
@@ -348,7 +581,9 @@ class RuleDetailView(APIView):
         return Response({"rule": RuleSerializer(rule).data}, status=200)
 
     def delete(self, request, id: str):
-        deleted, _ = ForwardingRule.objects.filter(user=request.user, id=id).delete()
+        deleted, _ = _ForwardingRuleModel.objects.filter(
+            user=request.user, id=id
+        ).delete()
         if not deleted:
             return api_error(code="not_found", message="not found", status=404)
         return Response(status=204)
@@ -368,15 +603,16 @@ class RuleTestView(APIView):
             )
 
         try:
-            rule = ForwardingRule.objects.get(user=request.user, id=id)
-        except ForwardingRule.DoesNotExist:
+            rule = _ForwardingRuleModel.objects.get(user=request.user, id=id)
+        except _ForwardingRuleModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
 
+        data = cast(dict[str, Any], ser.validated_data)
         try:
-            ep = IngestEndpoint.objects.get(
-                user=request.user, id=ser.validated_data["ingest_endpoint_id"]
+            ep = _IngestEndpointModel.objects.get(
+                user=request.user, id=data["ingest_endpoint_id"]
             )
-        except IngestEndpoint.DoesNotExist:
+        except _IngestEndpointModel.DoesNotExist:
             return api_error(
                 code="not_found", message="ingest endpoint not found", status=404
             )
@@ -386,8 +622,8 @@ class RuleTestView(APIView):
             user=request.user,
             ingest_endpoint=ep,
             received_at=timezone.now(),
-            content_type=ser.validated_data.get("content_type"),
-            payload_text=ser.validated_data["payload_text"],
+            content_type=data.get("content_type"),
+            payload_text=data["payload_text"],
             headers_json={},
             query_json={},
             remote_ip="",
@@ -408,13 +644,83 @@ class RuleTestView(APIView):
         )
 
 
+class RulesTestView(APIView):
+    permission_classes = [VerifiedEmailForUnsafeMethods]
+
+    def post(self, request):
+        ser = RuleTestRequestSerializer(data=request.data)
+        if not ser.is_valid():
+            return api_error(
+                code="validation_error",
+                message="invalid request",
+                status=400,
+                details=ser.errors,
+            )
+
+        data = cast(dict[str, Any], ser.validated_data)
+        try:
+            ep = _IngestEndpointModel.objects.get(
+                user=request.user,
+                id=data["ingest_endpoint_id"],
+                deleted_at__isnull=True,
+            )
+        except _IngestEndpointModel.DoesNotExist:
+            return api_error(
+                code="not_found", message="ingest endpoint not found", status=404
+            )
+
+        msg = _MessageModel(
+            id=uuid.uuid4(),
+            user=request.user,
+            ingest_endpoint=ep,
+            received_at=timezone.now(),
+            content_type=data.get("content_type"),
+            payload_text=data["payload_text"],
+            headers_json={},
+            query_json={},
+            remote_ip="",
+        )
+
+        rules_qs = (
+            _ForwardingRuleModel.objects.filter(user=request.user, enabled=True)
+            .select_related("channel")
+            .order_by("-created_at")
+        )
+        total = int(rules_qs.count())
+
+        ctx = build_template_context(msg, ep)
+        matches: list[dict] = []
+        for rule in rules_qs:
+            if not rule_matches_message(rule, msg):
+                continue
+            tpl = rule.get_payload_template()
+            rendered = render_template(tpl, ctx)
+            matches.append(
+                {
+                    "rule": RuleSerializer(rule).data,
+                    "channel": ChannelSerializer(rule.channel).data,
+                    "channel_type": str(rule.channel.type),
+                    "rendered_payload": rendered,
+                }
+            )
+
+        return Response(
+            {
+                "matched_count": len(matches),
+                "total_rules": total,
+                "matches": matches,
+            },
+            status=200,
+        )
+
+
 class MessageDeliveriesView(APIView):
     def get(self, request, id: str):
         try:
-            msg = Message.objects.get(user=request.user, id=id)
-        except Message.DoesNotExist:
+            msg = _MessageModel.objects.get(user=request.user, id=id)
+        except _MessageModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
-        ds = Delivery.objects.filter(user=request.user, message=msg).order_by(
+        ds = _DeliveryModel.objects.filter(user=request.user, message=msg).order_by(
             "created_at"
         )
         return Response(

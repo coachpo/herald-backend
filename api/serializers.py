@@ -1,5 +1,9 @@
+from typing import Any
+
 from django.utils import timezone
 from rest_framework import serializers
+
+from urllib.parse import urlparse
 
 from accounts.models import User
 from beacon.models import Channel, Delivery, ForwardingRule, IngestEndpoint, Message
@@ -14,12 +18,12 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["id", "email", "email_verified_at", "created_at"]
 
     def get_email_verified_at(self, obj: User):
-        return obj.email_verified_at.isoformat() if obj.email_verified_at else None
+        val: Any = getattr(obj, "email_verified_at", None)
+        return val.isoformat() if val else None
 
     def get_created_at(self, obj: User):
-        return (
-            obj.created_at.isoformat() if obj.created_at else timezone.now().isoformat()
-        )
+        val: Any = getattr(obj, "created_at", None)
+        return val.isoformat() if val else timezone.now().isoformat()
 
 
 class SignupRequestSerializer(serializers.Serializer):
@@ -74,13 +78,16 @@ class IngestEndpointSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "created_at", "last_used_at", "revoked_at"]
 
     def get_created_at(self, obj: IngestEndpoint):
-        return obj.created_at.isoformat() if obj.created_at else None
+        val: Any = getattr(obj, "created_at", None)
+        return val.isoformat() if val else None
 
     def get_last_used_at(self, obj: IngestEndpoint):
-        return obj.last_used_at.isoformat() if obj.last_used_at else None
+        val: Any = getattr(obj, "last_used_at", None)
+        return val.isoformat() if val else None
 
     def get_revoked_at(self, obj: IngestEndpoint):
-        return obj.revoked_at.isoformat() if obj.revoked_at else None
+        val: Any = getattr(obj, "revoked_at", None)
+        return val.isoformat() if val else None
 
 
 class IngestEndpointCreateRequestSerializer(serializers.Serializer):
@@ -101,6 +108,59 @@ class BarkChannelConfigSerializer(serializers.Serializer):
         child=serializers.CharField(), required=False, allow_null=True
     )
     default_payload_json = serializers.DictField(required=False)
+
+    def validate(self, attrs):
+        raw_base = str(attrs.get("server_base_url") or "").strip()
+        if raw_base.endswith("/push"):
+            raw_base = raw_base[: -len("/push")]
+        raw_base = raw_base.rstrip("/")
+
+        device_key_raw = attrs.get("device_key")
+        device_key = str(device_key_raw or "").strip() or None
+
+        keys_val = attrs.get("device_keys")
+        device_keys: list[str] | None
+        if keys_val is None:
+            device_keys = None
+        else:
+            cleaned = [str(x or "").strip() for x in (keys_val or [])]
+            cleaned = [x for x in cleaned if x]
+            device_keys = cleaned or None
+
+        if device_key is None and device_keys is None and raw_base:
+            try:
+                parsed = urlparse(raw_base)
+                segs = [s for s in (parsed.path or "").split("/") if s]
+                if len(segs) == 1:
+                    seg = segs[0]
+                    looks_like_key = (
+                        len(seg) >= 16
+                        and any(c.isdigit() for c in seg)
+                        and all(c.isalnum() or c in {"_", "-"} for c in seg)
+                    )
+                    if (
+                        looks_like_key
+                        and parsed.scheme in {"http", "https"}
+                        and parsed.netloc
+                    ):
+                        device_key = seg
+                        raw_base = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+            except Exception:
+                pass
+
+        if device_key is None and device_keys is None:
+            raise serializers.ValidationError(
+                {"device_key": ["required (or set device_keys)"]}
+            )
+
+        out = dict(attrs)
+        out["server_base_url"] = raw_base
+        out["device_key"] = device_key
+        if device_keys is not None:
+            out["device_keys"] = device_keys
+        else:
+            out["device_keys"] = None
+        return out
 
 
 class BarkChannelUpsertRequestSerializer(serializers.Serializer):
@@ -191,10 +251,12 @@ class ChannelSerializer(serializers.ModelSerializer):
         fields = ["id", "type", "name", "created_at", "disabled_at"]
 
     def get_created_at(self, obj: Channel):
-        return obj.created_at.isoformat() if obj.created_at else None
+        val: Any = getattr(obj, "created_at", None)
+        return val.isoformat() if val else None
 
     def get_disabled_at(self, obj: Channel):
-        return obj.disabled_at.isoformat() if obj.disabled_at else None
+        val: Any = getattr(obj, "disabled_at", None)
+        return val.isoformat() if val else None
 
 
 class RuleUpsertRequestSerializer(serializers.Serializer):
@@ -237,13 +299,16 @@ class RuleSerializer(serializers.ModelSerializer):
         ]
 
     def get_created_at(self, obj: ForwardingRule):
-        return obj.created_at.isoformat() if obj.created_at else None
+        val: Any = getattr(obj, "created_at", None)
+        return val.isoformat() if val else None
 
     def get_updated_at(self, obj: ForwardingRule):
-        return obj.updated_at.isoformat() if obj.updated_at else None
+        val: Any = getattr(obj, "updated_at", None)
+        return val.isoformat() if val else None
 
     def get_channel_id(self, obj: ForwardingRule):
-        return str(obj.channel_id)
+        val: Any = getattr(obj, "channel_id", None)
+        return str(val)
 
     def get_filter(self, obj: ForwardingRule):
         return obj.filter_json or {}
@@ -261,6 +326,12 @@ class RuleTestRequestSerializer(serializers.Serializer):
         required=False, allow_blank=True, allow_null=True
     )
     payload_text = serializers.CharField()
+
+
+class ChannelTestRequestSerializer(serializers.Serializer):
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    body = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    payload_json = serializers.DictField(required=False, allow_null=True)
 
 
 class DeliverySerializer(serializers.ModelSerializer):
@@ -288,19 +359,24 @@ class DeliverySerializer(serializers.ModelSerializer):
         ]
 
     def get_message_id(self, obj: Delivery):
-        return str(obj.message_id)
+        val: Any = getattr(obj, "message_id", None)
+        return str(val)
 
     def get_rule_id(self, obj: Delivery):
-        return str(obj.rule_id)
+        val: Any = getattr(obj, "rule_id", None)
+        return str(val)
 
     def get_channel_id(self, obj: Delivery):
-        return str(obj.channel_id)
+        val: Any = getattr(obj, "channel_id", None)
+        return str(val)
 
     def get_next_attempt_at(self, obj: Delivery):
-        return obj.next_attempt_at.isoformat() if obj.next_attempt_at else None
+        val: Any = getattr(obj, "next_attempt_at", None)
+        return val.isoformat() if val else None
 
     def get_sent_at(self, obj: Delivery):
-        return obj.sent_at.isoformat() if obj.sent_at else None
+        val: Any = getattr(obj, "sent_at", None)
+        return val.isoformat() if val else None
 
     def get_last_error(self, obj: Delivery):
         return obj.last_error
@@ -327,13 +403,15 @@ class MessageSummarySerializer(serializers.ModelSerializer):
         ]
 
     def get_ingest_endpoint_id(self, obj: Message):
-        return str(obj.ingest_endpoint_id)
+        val: Any = getattr(obj, "ingest_endpoint_id", None)
+        return str(val)
 
     def get_received_at(self, obj: Message):
-        return obj.received_at.isoformat() if obj.received_at else None
+        val: Any = getattr(obj, "received_at", None)
+        return val.isoformat() if val else None
 
     def get_payload_preview(self, obj: Message):
-        text = obj.payload_text or ""
+        text = str(getattr(obj, "payload_text", "") or "")
         return text[:200]
 
     def get_deliveries(self, obj: Message):
@@ -367,13 +445,16 @@ class MessageDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_ingest_endpoint_id(self, obj: Message):
-        return str(obj.ingest_endpoint_id)
+        val: Any = getattr(obj, "ingest_endpoint_id", None)
+        return str(val)
 
     def get_received_at(self, obj: Message):
-        return obj.received_at.isoformat() if obj.received_at else None
+        val: Any = getattr(obj, "received_at", None)
+        return val.isoformat() if val else None
 
     def get_deleted_at(self, obj: Message):
-        return obj.deleted_at.isoformat() if obj.deleted_at else None
+        val: Any = getattr(obj, "deleted_at", None)
+        return val.isoformat() if val else None
 
     def get_headers(self, obj: Message):
         return obj.headers_json or {}

@@ -16,6 +16,7 @@ class IngestEndpoint(models.Model):
     token_hash = models.CharField(max_length=64, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -26,6 +27,10 @@ class IngestEndpoint(models.Model):
     @property
     def is_revoked(self) -> bool:
         return self.revoked_at is not None
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
 
 
 class Message(models.Model):

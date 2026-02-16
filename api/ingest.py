@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+from typing import Any, cast
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -10,6 +11,12 @@ from accounts.tokens import hash_token
 from beacon.models import Delivery, ForwardingRule, IngestEndpoint, Message
 from beacon.redaction import redact_headers
 from beacon.rules import rule_matches_message
+
+
+_DeliveryModel = cast(Any, Delivery)
+_ForwardingRuleModel = cast(Any, ForwardingRule)
+_IngestEndpointModel = cast(Any, IngestEndpoint)
+_MessageModel = cast(Any, Message)
 
 
 def _json_error(*, code: str, message: str, status: int, details: dict | None = None):
@@ -27,8 +34,10 @@ def ingest_view(request, endpoint_id):
         )
 
     try:
-        endpoint = IngestEndpoint.objects.select_related("user").get(id=endpoint_id)
-    except IngestEndpoint.DoesNotExist:
+        endpoint = _IngestEndpointModel.objects.select_related("user").get(
+            id=endpoint_id
+        )
+    except _IngestEndpointModel.DoesNotExist:
         return _json_error(code="not_authenticated", message="unauthorized", status=401)
 
     raw_key = (request.headers.get("X-Beacon-Ingest-Key") or "").strip()
@@ -45,6 +54,9 @@ def ingest_view(request, endpoint_id):
         return _json_error(code="not_authenticated", message="unauthorized", status=401)
 
     if endpoint.revoked_at is not None:
+        return _json_error(code="not_authenticated", message="unauthorized", status=401)
+
+    if endpoint.deleted_at is not None:
         return _json_error(code="not_authenticated", message="unauthorized", status=401)
 
     user = endpoint.user
@@ -98,7 +110,7 @@ def ingest_view(request, endpoint_id):
     headers = redact_headers(dict(request.headers))
     query = {k: v for k, v in request.GET.items()}
 
-    msg = Message.objects.create(
+    msg = _MessageModel.objects.create(
         user=user,
         ingest_endpoint=endpoint,
         content_type=content_type or None,
@@ -113,13 +125,13 @@ def ingest_view(request, endpoint_id):
     endpoint.last_used_at = timezone.now()
     endpoint.save(update_fields=["last_used_at"])
 
-    rules = ForwardingRule.objects.filter(user=user, enabled=True).select_related(
+    rules = _ForwardingRuleModel.objects.filter(user=user, enabled=True).select_related(
         "channel"
     )
     now = timezone.now()
     for rule in rules:
         if rule_matches_message(rule, msg):
-            Delivery.objects.create(
+            _DeliveryModel.objects.create(
                 user=user,
                 message=msg,
                 rule=rule,

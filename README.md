@@ -23,5 +23,5 @@ python manage.py deliveries_worker
 ## Notes
 
 - APIs are served under `/api/*`.
-- Ingest endpoint: `POST /api/ingest/{token}`.
+- Ingest endpoint: `POST /api/ingest/{endpoint_id}` (canonical URL uses a dashless UUID).
 - Dashboard auth uses JWT access tokens (`Authorization: Bearer ...`) and a refresh token returned in JSON (rotated on refresh).

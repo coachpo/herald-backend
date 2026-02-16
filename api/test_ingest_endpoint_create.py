@@ -1,6 +1,7 @@
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
+from typing import Any, cast
 
 from accounts.jwt import issue_access_token
 from accounts.models import User
@@ -22,6 +23,7 @@ class IngestEndpointCreateResponseTests(TestCase):
             format="json",
             HTTP_AUTHORIZATION=f"Bearer {access}",
         )
+        resp = cast(Any, resp)
         self.assertEqual(resp.status_code, 201)
         data = resp.json()
         self.assertIn("endpoint", data)
@@ -30,5 +32,7 @@ class IngestEndpointCreateResponseTests(TestCase):
         self.assertNotIn("token", data)
 
         endpoint_id = data["endpoint"]["id"]
-        self.assertIn(f"/api/ingest/{endpoint_id}", data["ingest_url"])
+        self.assertIn(
+            f"/api/ingest/{str(endpoint_id).replace('-', '')}", data["ingest_url"]
+        )
         self.assertNotIn(data["ingest_key"], data["ingest_url"])
