@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import timedelta
 from typing import Any, cast
 
 import requests
 from django.db import transaction
+from django.db.utils import OperationalError
 from django.db.models import Count
 from django.utils import timezone
 from rest_framework.response import Response
@@ -232,14 +234,33 @@ class ChannelsView(APIView):
 
         data = cast(dict[str, Any], ser.validated_data)
         cfg = data["config"]
-        channel = _ChannelModel(
-            user=request.user,
-            type=data["type"],
-            name=data["name"],
-            config_json_encrypted="",
-        )
-        channel.config = cfg
-        channel.save()
+
+        channel: Channel | None = None
+        for attempt in range(3):
+            try:
+                ch = cast(
+                    Channel,
+                    _ChannelModel(
+                        user=request.user,
+                        type=data["type"],
+                        name=data["name"],
+                        config_json_encrypted="",
+                    ),
+                )
+                ch.config = cfg
+                ch.save()
+                channel = ch
+                break
+            except OperationalError as e:
+                if "database is locked" in str(e).lower() and attempt < 2:
+                    time.sleep(0.05 * (2**attempt))
+                    continue
+                raise
+
+        if channel is None:
+            return api_error(
+                code="temporarily_unavailable", message="try again", status=503
+            )
 
         return Response(
             {"channel": ChannelSerializer(channel).data, "config": cfg}, status=201
