@@ -96,6 +96,8 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 _hosts = [
     h.strip()
     for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
@@ -122,6 +124,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "beacon_spear.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -289,6 +292,37 @@ EMAIL_BACKEND = (
 EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
 
 APP_BASE_URL = os.environ.get("NEXT_PUBLIC_BASE_URL", "http://localhost:3000")
+
+
+def _normalize_origin(raw: str) -> str | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    if "://" not in s:
+        s = f"https://{s}"
+    parsed = urlparse(s)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+_cors_from_env = [
+    x.strip()
+    for x in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+    if x.strip()
+]
+
+_cors_origins: set[str] = set()
+for raw in _cors_from_env or [
+    APP_BASE_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]:
+    origin = _normalize_origin(raw)
+    if origin:
+        _cors_origins.add(origin)
+
+CORS_ALLOWED_ORIGINS = sorted(_cors_origins)
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
