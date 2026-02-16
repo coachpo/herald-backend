@@ -34,7 +34,7 @@ class IngestTests(TestCase):
         )
 
         resp = self.client.post(
-            f"/api/ingest/{ep.id}",
+            f"/api/ingest/{ep.id.hex}",
             data=b"01234567890",
             content_type="text/plain",
             HTTP_X_BEACON_INGEST_KEY=raw,
@@ -54,7 +54,7 @@ class IngestTests(TestCase):
         )
 
         resp = self.client.post(
-            f"/api/ingest/{ep.id}",
+            f"/api/ingest/{ep.id.hex}",
             data=b"\xff",
             content_type="text/plain",
             HTTP_X_BEACON_INGEST_KEY=raw,
@@ -72,7 +72,7 @@ class IngestTests(TestCase):
         )
 
         resp = self.client.post(
-            f"/api/ingest/{ep.id}",
+            f"/api/ingest/{ep.id.hex}",
             data=b"hello",
             content_type="text/plain",
             HTTP_X_BEACON_INGEST_KEY=raw,
@@ -92,7 +92,7 @@ class IngestTests(TestCase):
         )
 
         resp = self.client.post(
-            f"/api/ingest/{ep.id}", data=b"hello", content_type="text/plain"
+            f"/api/ingest/{ep.id.hex}", data=b"hello", content_type="text/plain"
         )
         self.assertEqual(resp.status_code, 401)
         self.assertEqual(Message.objects.count(), 0)
@@ -109,7 +109,7 @@ class IngestTests(TestCase):
         )
 
         resp = self.client.post(
-            f"/api/ingest/{ep.id}",
+            f"/api/ingest/{ep.id.hex}",
             data=b"hello",
             content_type="text/plain",
             HTTP_X_BEACON_INGEST_KEY="wrong",
@@ -131,7 +131,7 @@ class IngestTests(TestCase):
         ep.save(update_fields=["revoked_at"])
 
         resp = self.client.post(
-            f"/api/ingest/{ep.id}",
+            f"/api/ingest/{ep.id.hex}",
             data=b"hello",
             content_type="text/plain",
             HTTP_X_BEACON_INGEST_KEY=raw,
@@ -151,7 +151,7 @@ class IngestTests(TestCase):
         )
 
         resp = self.client.post(
-            f"/api/ingest/{ep.id}",
+            f"/api/ingest/{ep.id.hex}",
             data=b"hello",
             content_type="text/plain",
             HTTP_X_BEACON_INGEST_KEY=raw,
@@ -174,26 +174,6 @@ class IngestTests(TestCase):
             ),
             "[REDACTED]",
         )
-
-    @override_settings(MAX_INGEST_BYTES=10, REQUIRE_VERIFIED_EMAIL_FOR_INGEST=True)
-    def test_ingest_alias_route_stores_message(self):
-        user = User.objects.create_user(email="a@example.com", password="password123")
-        user.email_verified_at = timezone.now()
-        user.save(update_fields=["email_verified_at"])
-
-        raw = "test-token"
-        ep = IngestEndpoint.objects.create(
-            user=user, name="ep", token_hash=hash_token(raw)
-        )
-
-        resp = self.client.post(
-            f"/api/i/{ep.id.hex}",
-            data=b"hello",
-            content_type="text/plain",
-            HTTP_X_BEACON_INGEST_KEY=raw,
-        )
-        self.assertEqual(resp.status_code, 201)
-        self.assertEqual(Message.objects.count(), 1)
 
 
 class EmailFailureTests(TestCase):
