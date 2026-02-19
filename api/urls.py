@@ -16,6 +16,7 @@ from .views_auth import (
     SignupView,
     VerifyEmailView,
 )
+from .views_edge import EdgeConfigView
 from .views_resources import (
     ChannelDetailView,
     ChannelTestView,
@@ -66,4 +67,5 @@ urlpatterns = [
     path("rules/<uuid:id>", RuleDetailView.as_view()),
     path("rules/<uuid:id>/test", RuleTestView.as_view()),
     path("messages/<uuid:id>/deliveries", MessageDeliveriesView.as_view()),
+    path("edge-config", EdgeConfigView.as_view()),
 ]

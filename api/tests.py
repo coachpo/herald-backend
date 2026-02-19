@@ -10,12 +10,16 @@ from accounts.models import EmailVerificationToken as EmailVerificationTokenMode
 from accounts.models import PasswordResetToken as PasswordResetTokenModel
 from beacon.models import IngestEndpoint as IngestEndpointModel
 from beacon.models import Message as MessageModel
+from beacon.models import Channel as ChannelModel
+from beacon.models import ForwardingRule as ForwardingRuleModel
 
 User: Any = UserModel
 EmailVerificationToken: Any = EmailVerificationTokenModel
 PasswordResetToken: Any = PasswordResetTokenModel
 IngestEndpoint: Any = IngestEndpointModel
 Message: Any = MessageModel
+Channel: Any = ChannelModel
+ForwardingRule: Any = ForwardingRuleModel
 
 
 class IngestTests(TestCase):
@@ -237,6 +241,83 @@ class EmailFailureTests(TestCase):
         )
 
 
+class RateLimitTests(TestCase):
+    def setUp(self):
+        self.client = cast(Any, APIClient())
+
+    def test_signup_rate_limit_per_ip(self):
+        for i in range(10):
+            resp = self.client.post(
+                "/api/auth/signup",
+                data={"email": f"rl{i}@example.com", "password": "password123"},
+                format="json",
+            )
+            self.assertIn(resp.status_code, [201, 400])
+
+        resp = self.client.post(
+            "/api/auth/signup",
+            data={"email": "rl_extra@example.com", "password": "password123"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        data = resp.json()
+        self.assertEqual(data.get("code"), "rate_limited")
+
+    def test_forgot_password_rate_limit_per_ip(self):
+        User.objects.create_user(email="fp@example.com", password="password123")
+        for _ in range(10):
+            resp = self.client.post(
+                "/api/auth/forgot-password",
+                data={"email": "fp@example.com"},
+                format="json",
+            )
+            self.assertEqual(resp.status_code, 204)
+
+        resp = self.client.post(
+            "/api/auth/forgot-password",
+            data={"email": "fp@example.com"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 204)
+        self.assertLessEqual(
+            PasswordResetToken.objects.filter(user__email="fp@example.com").count(), 10
+        )
+
+    def test_forgot_password_rate_limit_per_email(self):
+        User.objects.create_user(email="fpe@example.com", password="password123")
+        for _ in range(5):
+            resp = self.client.post(
+                "/api/auth/forgot-password",
+                data={"email": "fpe@example.com"},
+                format="json",
+            )
+            self.assertEqual(resp.status_code, 204)
+
+        resp = self.client.post(
+            "/api/auth/forgot-password",
+            data={"email": "fpe@example.com"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 204)
+        self.assertLessEqual(
+            PasswordResetToken.objects.filter(user__email="fpe@example.com").count(), 5
+        )
+
+    def test_resend_verification_rate_limit_per_user(self):
+        user = User.objects.create_user(email="rv@example.com", password="password123")
+        self.client.force_authenticate(user=user)
+
+        for _ in range(3):
+            resp = self.client.post("/api/auth/resend-verification")
+            self.assertEqual(resp.status_code, 204)
+
+        resp = self.client.post("/api/auth/resend-verification")
+        self.assertEqual(resp.status_code, 204)
+        self.assertLessEqual(
+            EmailVerificationToken.objects.filter(user=user).count(), 4
+        )
+
+
 class SignupDisabledTests(TestCase):
     def setUp(self):
         self.client = cast(Any, APIClient())
@@ -252,3 +333,94 @@ class SignupDisabledTests(TestCase):
         data = resp.json()
         self.assertEqual(data.get("code"), "signup_disabled")
         self.assertFalse(User.objects.filter(email="disabled@example.com").exists())
+
+
+class EdgeConfigTests(TestCase):
+    def setUp(self):
+        self.client = cast(Any, APIClient())
+        self.user = User.objects.create_user(
+            email="edge@example.com", password="password123"
+        )
+        self.user.email_verified_at = timezone.now()
+        self.user.save(update_fields=["email_verified_at"])
+        self.client.force_authenticate(user=self.user)
+
+    def test_edge_config_requires_auth(self):
+        client = cast(Any, APIClient())
+        resp = client.get("/api/edge-config")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_edge_config_returns_correct_shape(self):
+        IngestEndpoint.objects.create(
+            user=self.user, name="ep1", token_hash=hash_token("tok")
+        )
+
+        ch_bark = Channel.objects.create(user=self.user, type="bark", name="My Bark")
+        ch_bark.config = {
+            "server_base_url": "https://bark.example.com",
+            "device_key": "dk",
+        }
+        ch_bark.save()
+
+        ch_ntfy = Channel.objects.create(user=self.user, type="ntfy", name="My Ntfy")
+        ch_ntfy.config = {"server_base_url": "https://ntfy.sh", "topic": "t"}
+        ch_ntfy.save()
+
+        ch_mqtt = Channel.objects.create(user=self.user, type="mqtt", name="MQTT")
+        ch_mqtt.config = {"host": "mqtt.example.com"}
+        ch_mqtt.save()
+
+        ForwardingRule.objects.create(
+            user=self.user,
+            name="rule1",
+            channel=ch_bark,
+            filter_json={"body": {"contains": ["alert"]}},
+            payload_template_json={"body": "{{message.body}}"},
+        )
+
+        resp = self.client.get("/api/edge-config")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+
+        self.assertIn("ingest_endpoints", data)
+        self.assertIn("channels", data)
+        self.assertIn("rules", data)
+        self.assertIn("version", data)
+        self.assertIn("updated_at", data)
+
+        self.assertEqual(len(data["ingest_endpoints"]), 1)
+        self.assertEqual(data["ingest_endpoints"][0]["name"], "ep1")
+        self.assertIn("token_hash", data["ingest_endpoints"][0])
+
+        self.assertEqual(len(data["channels"]), 2)
+        channel_types = {ch["type"] for ch in data["channels"]}
+        self.assertEqual(channel_types, {"bark", "ntfy"})
+
+        bark_ch = next(c for c in data["channels"] if c["type"] == "bark")
+        self.assertEqual(bark_ch["config"]["device_key"], "dk")
+
+        self.assertEqual(len(data["rules"]), 1)
+        self.assertEqual(data["rules"][0]["name"], "rule1")
+        self.assertEqual(data["rules"][0]["channel_id"], str(ch_bark.id))
+        self.assertEqual(data["rules"][0]["filter"], {"body": {"contains": ["alert"]}})
+
+    def test_edge_config_excludes_disabled_channels(self):
+        ch = Channel.objects.create(user=self.user, type="bark", name="Disabled")
+        ch.config = {"server_base_url": "https://bark.example.com"}
+        ch.disabled_at = timezone.now()
+        ch.save()
+
+        resp = self.client.get("/api/edge-config")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.json()["channels"]), 0)
+
+    def test_edge_config_excludes_revoked_endpoints(self):
+        ep = IngestEndpoint.objects.create(
+            user=self.user, name="revoked", token_hash=hash_token("tok")
+        )
+        ep.revoked_at = timezone.now()
+        ep.save(update_fields=["revoked_at"])
+
+        resp = self.client.get("/api/edge-config")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.json()["ingest_endpoints"]), 0)

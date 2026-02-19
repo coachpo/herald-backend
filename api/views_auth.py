@@ -258,6 +258,10 @@ class ResendVerificationView(APIView):
         if user.email_verified_at is not None:
             return Response(status=204)
 
+        ip = _client_ip(request._request) or ""
+        if ip and not allow_rate(key=f"rv:ip:{ip}", limit=10, window_seconds=3600):
+            return Response(status=204)
+
         key = f"rv:{user.id}"
         if not allow_rate(key=key, limit=3, window_seconds=3600):
             return Response(status=204)
@@ -326,7 +330,9 @@ class ForgotPasswordView(APIView):
         data = cast(dict[str, Any], ser.validated_data)
         email = str(data.get("email") or "").strip().lower()
         ip = _client_ip(request._request) or ""
-        if not allow_rate(key=f"fp:{ip}", limit=10, window_seconds=3600):
+        if ip and not allow_rate(key=f"fp:{ip}", limit=10, window_seconds=3600):
+            return Response(status=204)
+        if email and not allow_rate(key=f"fp:e:{email}", limit=5, window_seconds=3600):
             return Response(status=204)
 
         try:
