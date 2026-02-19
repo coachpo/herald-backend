@@ -29,9 +29,7 @@ class DeleteAccountTests(TestCase):
         _MessageModel.objects.create(
             user=user,
             ingest_endpoint=ep,
-            content_type="text/plain",
-            payload_text="hello",
-            payload_sha256="",
+            body="hello",
             headers_json={},
             query_json={},
             remote_ip="127.0.0.1",

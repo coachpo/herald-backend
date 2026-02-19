@@ -54,12 +54,17 @@ def build_bark_payload(
     default_payload = cfg.get("default_payload_json") or {}
 
     ctx = build_template_context(message, ingest_endpoint)
-    tpl = rule.payload_template_json or rule.bark_payload_template_json or {}
+    tpl = rule.get_payload_template()
     rendered = render_template(tpl, ctx)
 
     payload = dict(default_payload)
     if isinstance(rendered, dict):
         payload.update(rendered)
+
+    if not payload.get("body") and message.body:
+        payload["body"] = message.body
+    if not payload.get("title") and message.title:
+        payload["title"] = message.title
 
     if cfg.get("device_key") is not None:
         payload["device_key"] = cfg.get("device_key")

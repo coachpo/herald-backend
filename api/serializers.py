@@ -264,16 +264,7 @@ class RuleUpsertRequestSerializer(serializers.Serializer):
     enabled = serializers.BooleanField()
     channel_id = serializers.UUIDField()
     filter = serializers.DictField(required=False)
-    payload_template = serializers.DictField(required=False)
-    bark_payload_template = serializers.DictField(required=False)
-
-    def validate(self, attrs):
-        if (
-            attrs.get("payload_template") is None
-            and attrs.get("bark_payload_template") is None
-        ):
-            raise serializers.ValidationError({"payload_template": ["required"]})
-        return attrs
+    payload_template = serializers.DictField(required=False, default=dict)
 
 
 class RuleSerializer(serializers.ModelSerializer):
@@ -281,7 +272,6 @@ class RuleSerializer(serializers.ModelSerializer):
     updated_at = serializers.SerializerMethodField()
     channel_id = serializers.SerializerMethodField()
     filter = serializers.SerializerMethodField()
-    bark_payload_template = serializers.SerializerMethodField()
     payload_template = serializers.SerializerMethodField()
 
     class Meta:
@@ -292,7 +282,6 @@ class RuleSerializer(serializers.ModelSerializer):
             "enabled",
             "channel_id",
             "filter",
-            "bark_payload_template",
             "payload_template",
             "created_at",
             "updated_at",
@@ -313,19 +302,13 @@ class RuleSerializer(serializers.ModelSerializer):
     def get_filter(self, obj: ForwardingRule):
         return obj.filter_json or {}
 
-    def get_bark_payload_template(self, obj: ForwardingRule):
-        return obj.bark_payload_template_json or {}
-
     def get_payload_template(self, obj: ForwardingRule):
-        return obj.payload_template_json or obj.bark_payload_template_json or {}
+        return obj.payload_template_json or {}
 
 
 class RuleTestRequestSerializer(serializers.Serializer):
     ingest_endpoint_id = serializers.UUIDField()
-    content_type = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True
-    )
-    payload_text = serializers.CharField()
+    payload = serializers.DictField()
 
 
 class ChannelTestRequestSerializer(serializers.Serializer):
@@ -341,7 +324,9 @@ class DeliverySerializer(serializers.ModelSerializer):
     provider_response = serializers.SerializerMethodField()
     message_id = serializers.SerializerMethodField()
     rule_id = serializers.SerializerMethodField()
+    rule_name = serializers.SerializerMethodField()
     channel_id = serializers.SerializerMethodField()
+    channel_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Delivery
@@ -349,7 +334,9 @@ class DeliverySerializer(serializers.ModelSerializer):
             "id",
             "message_id",
             "rule_id",
+            "rule_name",
             "channel_id",
+            "channel_name",
             "status",
             "attempt_count",
             "next_attempt_at",
@@ -366,9 +353,21 @@ class DeliverySerializer(serializers.ModelSerializer):
         val: Any = getattr(obj, "rule_id", None)
         return str(val)
 
+    def get_rule_name(self, obj: Delivery):
+        rule = getattr(obj, "rule", None)
+        if rule is None:
+            return None
+        return getattr(rule, "name", None)
+
     def get_channel_id(self, obj: Delivery):
         val: Any = getattr(obj, "channel_id", None)
         return str(val)
+
+    def get_channel_name(self, obj: Delivery):
+        channel = getattr(obj, "channel", None)
+        if channel is None:
+            return None
+        return getattr(channel, "name", None)
 
     def get_next_attempt_at(self, obj: Delivery):
         val: Any = getattr(obj, "next_attempt_at", None)
@@ -388,7 +387,8 @@ class DeliverySerializer(serializers.ModelSerializer):
 class MessageSummarySerializer(serializers.ModelSerializer):
     ingest_endpoint_id = serializers.SerializerMethodField()
     received_at = serializers.SerializerMethodField()
-    payload_preview = serializers.SerializerMethodField()
+    body_preview = serializers.SerializerMethodField()
+    tags = serializers.SerializerMethodField()
     deliveries = serializers.SerializerMethodField()
 
     class Meta:
@@ -397,8 +397,11 @@ class MessageSummarySerializer(serializers.ModelSerializer):
             "id",
             "ingest_endpoint_id",
             "received_at",
-            "content_type",
-            "payload_preview",
+            "title",
+            "body_preview",
+            "group",
+            "priority",
+            "tags",
             "deliveries",
         ]
 
@@ -410,9 +413,13 @@ class MessageSummarySerializer(serializers.ModelSerializer):
         val: Any = getattr(obj, "received_at", None)
         return val.isoformat() if val else None
 
-    def get_payload_preview(self, obj: Message):
-        text = str(getattr(obj, "payload_text", "") or "")
+    def get_body_preview(self, obj: Message):
+        text = str(getattr(obj, "body", "") or "")
         return text[:200]
+
+    def get_tags(self, obj: Message):
+        val = obj.tags_json
+        return val if isinstance(val, list) else []
 
     def get_deliveries(self, obj: Message):
         counts = {"queued": 0, "sending": 0, "retry": 0, "sent": 0, "failed": 0}
@@ -428,6 +435,8 @@ class MessageDetailSerializer(serializers.ModelSerializer):
     deleted_at = serializers.SerializerMethodField()
     headers = serializers.SerializerMethodField()
     query = serializers.SerializerMethodField()
+    tags = serializers.SerializerMethodField()
+    extras = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -435,8 +444,14 @@ class MessageDetailSerializer(serializers.ModelSerializer):
             "id",
             "ingest_endpoint_id",
             "received_at",
+            "title",
+            "body",
+            "group",
+            "priority",
+            "tags",
+            "url",
+            "extras",
             "content_type",
-            "payload_text",
             "headers",
             "query",
             "remote_ip",
@@ -461,3 +476,11 @@ class MessageDetailSerializer(serializers.ModelSerializer):
 
     def get_query(self, obj: Message):
         return obj.query_json or {}
+
+    def get_tags(self, obj: Message):
+        val = obj.tags_json
+        return val if isinstance(val, list) else []
+
+    def get_extras(self, obj: Message):
+        val = obj.extras_json
+        return val if isinstance(val, dict) else {}

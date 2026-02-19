@@ -134,7 +134,29 @@ class MessagesView(APIView):
 
         q = request.query_params.get("q")
         if q:
-            qs = qs.filter(payload_text__icontains=q)
+            qs = qs.filter(body__icontains=q)
+
+        group = request.query_params.get("group")
+        if group:
+            qs = qs.filter(group=group)
+
+        priority_min = request.query_params.get("priority_min")
+        if priority_min:
+            try:
+                qs = qs.filter(priority__gte=int(priority_min))
+            except (ValueError, TypeError):
+                pass
+
+        priority_max = request.query_params.get("priority_max")
+        if priority_max:
+            try:
+                qs = qs.filter(priority__lte=int(priority_max))
+            except (ValueError, TypeError):
+                pass
+
+        tag = request.query_params.get("tag")
+        if tag:
+            qs = qs.filter(tags_json__contains=[tag])
 
         from_ts = request.query_params.get("from")
         to_ts = request.query_params.get("to")
@@ -168,7 +190,9 @@ class MessageDetailView(APIView):
 
     def get(self, request, id: str):
         try:
-            msg = _MessageModel.objects.get(user=request.user, id=id)
+            msg = _MessageModel.objects.get(
+                user=request.user, id=id, deleted_at__isnull=True
+            )
         except _MessageModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
         return Response({"message": MessageDetailSerializer(msg).data}, status=200)
@@ -542,7 +566,7 @@ class RulesView(APIView):
         except _ChannelModel.DoesNotExist:
             return api_error(code="not_found", message="channel not found", status=404)
 
-        tpl = data.get("payload_template") or data.get("bark_payload_template") or {}
+        tpl = data.get("payload_template") or {}
 
         rule = _ForwardingRuleModel.objects.create(
             user=request.user,
@@ -550,7 +574,6 @@ class RulesView(APIView):
             enabled=data["enabled"],
             channel=channel,
             filter_json=data.get("filter") or {},
-            bark_payload_template_json=tpl,
             payload_template_json=tpl,
         )
         return Response({"rule": RuleSerializer(rule).data}, status=201)
@@ -589,13 +612,12 @@ class RuleDetailView(APIView):
         except _ChannelModel.DoesNotExist:
             return api_error(code="not_found", message="channel not found", status=404)
 
-        tpl = data.get("payload_template") or data.get("bark_payload_template") or {}
+        tpl = data.get("payload_template") or {}
 
         rule.name = data["name"]
         rule.enabled = data["enabled"]
         rule.channel = channel
         rule.filter_json = data.get("filter") or {}
-        rule.bark_payload_template_json = tpl
         rule.payload_template_json = tpl
         rule.save()
 
@@ -638,13 +660,20 @@ class RuleTestView(APIView):
                 code="not_found", message="ingest endpoint not found", status=404
             )
 
+        payload = data.get("payload") or {}
         msg = Message(
             id=uuid.uuid4(),
             user=request.user,
             ingest_endpoint=ep,
             received_at=timezone.now(),
-            content_type=data.get("content_type"),
-            payload_text=data["payload_text"],
+            title=payload.get("title"),
+            body=payload.get("body", ""),
+            group=payload.get("group"),
+            priority=payload.get("priority", 3),
+            tags_json=payload.get("tags", []),
+            url=payload.get("url"),
+            extras_json=payload.get("extras", {}),
+            content_type="application/json",
             headers_json={},
             query_json={},
             remote_ip="",
@@ -652,14 +681,13 @@ class RuleTestView(APIView):
 
         matches = rule_matches_message(rule, msg)
         ctx = build_template_context(msg, ep)
-        tpl = rule.payload_template_json or rule.bark_payload_template_json or {}
+        tpl = rule.get_payload_template()
         rendered = render_template(tpl, ctx)
         return Response(
             {
                 "matches": bool(matches),
                 "channel_type": rule.channel.type,
                 "rendered_payload": rendered,
-                "rendered_bark_payload": rendered,
             },
             status=200,
         )
@@ -690,13 +718,20 @@ class RulesTestView(APIView):
                 code="not_found", message="ingest endpoint not found", status=404
             )
 
+        payload = data.get("payload") or {}
         msg = _MessageModel(
             id=uuid.uuid4(),
             user=request.user,
             ingest_endpoint=ep,
             received_at=timezone.now(),
-            content_type=data.get("content_type"),
-            payload_text=data["payload_text"],
+            title=payload.get("title"),
+            body=payload.get("body", ""),
+            group=payload.get("group"),
+            priority=payload.get("priority", 3),
+            tags_json=payload.get("tags", []),
+            url=payload.get("url"),
+            extras_json=payload.get("extras", {}),
+            content_type="application/json",
             headers_json={},
             query_json={},
             remote_ip="",
@@ -738,12 +773,15 @@ class RulesTestView(APIView):
 class MessageDeliveriesView(APIView):
     def get(self, request, id: str):
         try:
-            msg = _MessageModel.objects.get(user=request.user, id=id)
+            msg = _MessageModel.objects.get(
+                user=request.user, id=id, deleted_at__isnull=True
+            )
         except _MessageModel.DoesNotExist:
             return api_error(code="not_found", message="not found", status=404)
         ds = _DeliveryModel.objects.filter(user=request.user, message=msg).order_by(
             "created_at"
         )
+        ds = ds.select_related("rule", "channel")
         return Response(
             {"deliveries": DeliverySerializer(ds, many=True).data}, status=200
         )

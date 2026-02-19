@@ -24,8 +24,8 @@ class IngestEndpointArchiveTests(TestCase):
 
         resp1 = self.client.post(
             f"/api/ingest/{ep.id.hex}",
-            data=b"hello",
-            content_type="text/plain",
+            data=b'{"body":"hello"}',
+            content_type="application/json",
             HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp1.status_code, 201)
@@ -52,8 +52,8 @@ class IngestEndpointArchiveTests(TestCase):
 
         resp4 = self.client.post(
             f"/api/ingest/{ep.id.hex}",
-            data=b"hello2",
-            content_type="text/plain",
+            data=b'{"body":"hello2"}',
+            content_type="application/json",
             HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp4.status_code, 401)

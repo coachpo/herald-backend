@@ -39,9 +39,16 @@ class Message(models.Model):
     ingest_endpoint = models.ForeignKey(IngestEndpoint, on_delete=models.CASCADE)
     received_at = models.DateTimeField(auto_now_add=True)
 
+    title = models.CharField(max_length=500, null=True, blank=True)
+    body = models.TextField()
+    group = models.CharField(max_length=200, null=True, blank=True)
+    priority = models.IntegerField(default=3)
+    tags_json = models.JSONField(default=list)
+    url = models.URLField(max_length=2000, null=True, blank=True)
+    extras_json = models.JSONField(default=dict)
+
     content_type = models.CharField(max_length=255, null=True, blank=True)
-    payload_text = models.TextField()
-    payload_sha256 = models.CharField(max_length=64, null=True, blank=True)
+    body_sha256 = models.CharField(max_length=64, null=True, blank=True)
     headers_json = models.JSONField(default=dict)
     query_json = models.JSONField(default=dict)
     remote_ip = models.CharField(max_length=64)
@@ -52,6 +59,8 @@ class Message(models.Model):
         indexes = [
             models.Index(fields=["user", "received_at"]),
             models.Index(fields=["user", "ingest_endpoint", "received_at"]),
+            models.Index(fields=["user", "group"]),
+            models.Index(fields=["user", "priority"]),
         ]
 
     def soft_delete(self):
@@ -103,7 +112,6 @@ class ForwardingRule(models.Model):
 
     filter_json = models.JSONField(default=dict)
     channel = models.ForeignKey(Channel, on_delete=models.CASCADE)
-    bark_payload_template_json = models.JSONField(default=dict)
     payload_template_json = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -118,7 +126,7 @@ class ForwardingRule(models.Model):
         val = self.payload_template_json
         if isinstance(val, dict) and val:
             return val
-        return self.bark_payload_template_json or {}
+        return {}
 
 
 class Delivery(models.Model):

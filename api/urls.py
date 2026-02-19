@@ -50,6 +50,7 @@ urlpatterns = [
     path("auth/change-email", ChangeEmailView.as_view()),
     path("auth/change-password", ChangePasswordView.as_view()),
     path("auth/delete-account", DeleteAccountView.as_view()),
+    path("ingest/<uuid:endpoint_id>", ingest_view),
     path("ingest/<uuidhex:endpoint_id>", ingest_view),
     path("ingest-endpoints", IngestEndpointsView.as_view()),
     path("ingest-endpoints/<uuid:id>/revoke", IngestEndpointRevokeView.as_view()),

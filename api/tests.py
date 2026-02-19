@@ -35,8 +35,8 @@ class IngestTests(TestCase):
 
         resp = self.client.post(
             f"/api/ingest/{ep.id.hex}",
-            data=b"01234567890",
-            content_type="text/plain",
+            data=b'{"body":"hello"}',
+            content_type="application/json",
             HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 413)
@@ -56,9 +56,10 @@ class IngestTests(TestCase):
         resp = self.client.post(
             f"/api/ingest/{ep.id.hex}",
             data=b"\xff",
-            content_type="text/plain",
+            content_type="application/json",
             HTTP_X_BEACON_INGEST_KEY=raw,
         )
+
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(Message.objects.count(), 0)
 
@@ -73,8 +74,8 @@ class IngestTests(TestCase):
 
         resp = self.client.post(
             f"/api/ingest/{ep.id.hex}",
-            data=b"hello",
-            content_type="text/plain",
+            data=b'{"body":"hello"}',
+            content_type="application/json",
             HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 403)
@@ -92,7 +93,9 @@ class IngestTests(TestCase):
         )
 
         resp = self.client.post(
-            f"/api/ingest/{ep.id.hex}", data=b"hello", content_type="text/plain"
+            f"/api/ingest/{ep.id.hex}",
+            data=b'{"body":"hello"}',
+            content_type="application/json",
         )
         self.assertEqual(resp.status_code, 401)
         self.assertEqual(Message.objects.count(), 0)
@@ -110,9 +113,9 @@ class IngestTests(TestCase):
 
         resp = self.client.post(
             f"/api/ingest/{ep.id.hex}",
-            data=b"hello",
-            content_type="text/plain",
-            HTTP_X_BEACON_INGEST_KEY="wrong",
+            data=b'{"body":"hello"}',
+            content_type="application/json",
+            HTTP_X_BEACON_INGEST_KEY="wrong-token",
         )
         self.assertEqual(resp.status_code, 401)
         self.assertEqual(Message.objects.count(), 0)
@@ -132,14 +135,14 @@ class IngestTests(TestCase):
 
         resp = self.client.post(
             f"/api/ingest/{ep.id.hex}",
-            data=b"hello",
-            content_type="text/plain",
+            data=b'{"body":"hello"}',
+            content_type="application/json",
             HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 401)
         self.assertEqual(Message.objects.count(), 0)
 
-    @override_settings(MAX_INGEST_BYTES=10, REQUIRE_VERIFIED_EMAIL_FOR_INGEST=True)
+    @override_settings(MAX_INGEST_BYTES=100, REQUIRE_VERIFIED_EMAIL_FOR_INGEST=True)
     def test_ingest_stores_message(self):
         user = User.objects.create_user(email="a@example.com", password="password123")
         user.email_verified_at = timezone.now()
@@ -152,8 +155,8 @@ class IngestTests(TestCase):
 
         resp = self.client.post(
             f"/api/ingest/{ep.id.hex}",
-            data=b"hello",
-            content_type="text/plain",
+            data=b'{"title":"Hi","body":"hello","priority":4,"tags":["a"]}',
+            content_type="application/json",
             HTTP_X_BEACON_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 201)
@@ -162,7 +165,10 @@ class IngestTests(TestCase):
         msg = Message.objects.get()
         self.assertEqual(msg.user_id, user.id)
         self.assertEqual(msg.ingest_endpoint_id, ep.id)
-        self.assertEqual(msg.payload_text, "hello")
+        self.assertEqual(msg.body, "hello")
+        self.assertEqual(msg.title, "Hi")
+        self.assertEqual(msg.priority, 4)
+        self.assertEqual(msg.tags_json, ["a"])
         self.assertEqual(
             next(
                 (
@@ -174,6 +180,28 @@ class IngestTests(TestCase):
             ),
             "[REDACTED]",
         )
+
+    @override_settings(MAX_INGEST_BYTES=100, REQUIRE_VERIFIED_EMAIL_FOR_INGEST=True)
+    def test_ingest_accepts_dashed_uuid_path(self):
+        user = User.objects.create_user(email="a@example.com", password="password123")
+        user.email_verified_at = timezone.now()
+        user.save(update_fields=["email_verified_at"])
+
+        raw = "test-token"
+        ep = IngestEndpoint.objects.create(
+            user=user, name="ep", token_hash=hash_token(raw)
+        )
+
+        resp = self.client.post(
+            f"/api/ingest/{ep.id}",
+            data=b'{"body":"hello from dashed"}',
+            content_type="application/json",
+            HTTP_X_BEACON_INGEST_KEY=raw,
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(Message.objects.count(), 1)
+        msg = Message.objects.get()
+        self.assertEqual(msg.body, "hello from dashed")
 
 
 class EmailFailureTests(TestCase):

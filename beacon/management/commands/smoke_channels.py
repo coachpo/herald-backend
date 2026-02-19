@@ -55,8 +55,7 @@ class Command(BaseCommand):
             user=user,
             ingest_endpoint=ep,
             received_at=now,
-            content_type="text/plain",
-            payload_text=f"smoke {uuid.uuid4()}",
+            body=f"smoke {uuid.uuid4()}",
             headers_json={},
             query_json={},
             remote_ip="127.0.0.1",
@@ -225,7 +224,6 @@ class Command(BaseCommand):
             enabled=True,
             channel=channel,
             filter_json={},
-            bark_payload_template_json=payload_template,
             payload_template_json=payload_template,
         )
 

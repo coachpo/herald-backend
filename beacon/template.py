@@ -48,12 +48,29 @@ def render_template(value: object, ctx: Mapping[str, object]) -> object:
 def build_template_context(
     message: Message, ingest_endpoint: IngestEndpoint
 ) -> dict[str, object]:
+    tags = message.tags_json if isinstance(message.tags_json, list) else []
+    extras = message.extras_json if isinstance(message.extras_json, dict) else {}
+
     return {
         "message": {
             "id": str(message.id),
             "received_at": _iso(message.received_at),
-            "payload_text": message.payload_text,
-            "content_type": message.content_type,
+            "title": message.title or "",
+            "body": message.body or "",
+            "group": message.group or "",
+            "priority": str(message.priority),
+            "tags": ",".join(str(t) for t in tags),
+            "url": message.url or "",
+            "extras": {str(k): str(v) for k, v in extras.items()},
+        },
+        "request": {
+            "content_type": message.content_type or "",
+            "remote_ip": message.remote_ip or "",
+            "user_agent": message.user_agent or "",
+            "headers": message.headers_json
+            if isinstance(message.headers_json, dict)
+            else {},
+            "query": message.query_json if isinstance(message.query_json, dict) else {},
         },
         "ingest_endpoint": {
             "id": str(ingest_endpoint.id),

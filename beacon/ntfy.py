@@ -58,7 +58,7 @@ def build_ntfy_request(
         body_val = rendered_dict.get("text")
     body = _coerce_header_value(body_val) if body_val is not None else None
     if body is None:
-        body = message.payload_text or ""
+        body = message.body or ""
 
     headers: dict[str, str] = {}
     default_headers = cfg.get("default_headers_json")
@@ -72,6 +72,8 @@ def build_ntfy_request(
     title = _coerce_header_value(rendered_dict.get("title"))
     if title is not None:
         headers.setdefault("Title", title)
+    elif message.title:
+        headers.setdefault("Title", message.title)
 
     tags = rendered_dict.get("tags")
     if isinstance(tags, list):
@@ -82,10 +84,21 @@ def build_ntfy_request(
         t = _coerce_header_value(tags)
         if t is not None:
             headers.setdefault("Tags", t)
+        elif isinstance(message.tags_json, list) and message.tags_json:
+            joined = ",".join(
+                str(x).strip() for x in message.tags_json if str(x).strip()
+            )
+            if joined:
+                headers.setdefault("Tags", joined)
 
+    _PRIORITY_MAP = {1: "min", 2: "low", 3: "default", 4: "high", 5: "urgent"}
     prio = _coerce_header_value(rendered_dict.get("priority"))
     if prio is not None:
         headers.setdefault("Priority", prio)
+    elif message.priority and message.priority != 3:
+        ntfy_prio = _PRIORITY_MAP.get(message.priority)
+        if ntfy_prio:
+            headers.setdefault("Priority", ntfy_prio)
 
     click = _coerce_header_value(rendered_dict.get("click"))
     if click is not None:
