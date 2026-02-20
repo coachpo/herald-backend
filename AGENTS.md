@@ -1,37 +1,63 @@
 # backend/AGENTS.md
 
-## Project Overview
+## Overview
 
-Django 5 + Django REST Framework backend.
+Django 5.2 + DRF backend. JSON API under `/api/`, health check at `/healthz`, background delivery worker via management command.
 
-- JSON API is served under `/api/...`
-- Health check: `GET /healthz`
-- Background worker: `python manage.py deliveries_worker`
+## Structure
 
-Channel configs are stored encrypted in the DB (`Channel.config_json_encrypted`).
+```
+backend/
+├── beacon_spear/     # Django project config (settings, urls, middleware, wsgi/asgi)
+├── accounts/         # Custom User model (email-only), JWT auth, refresh tokens, email verification
+├── beacon/           # Domain models + business logic (see beacon/AGENTS.md)
+├── api/              # REST API views, serializers, ingest handler (see api/AGENTS.md)
+└── manage.py
+```
 
-## Build And Test Commands
+## Commands
 
-Run these from `backend/`.
+```bash
+python manage.py migrate --noinput
+python manage.py test                    # all unit tests
+python manage.py runserver 0.0.0.0:8000  # dev API server
+python manage.py deliveries_worker       # background delivery loop
+python manage.py smoke_channels --live   # optional live channel smoke test
+```
 
-- Run migrations:
-  - `python manage.py migrate --noinput`
-- Run backend unit tests:
-  - `python manage.py test`
+## Where to Look
 
-## Local Dev
+| Task | Location |
+|------|----------|
+| Add API endpoint | `api/urls.py` + `api/views_resources.py` or new view file |
+| Add auth endpoint | `api/urls.py` + `api/views_auth.py` |
+| Modify domain models | `beacon/models.py` → `makemigrations` |
+| Add notification provider | `beacon/{provider}.py` + wire in `deliveries_worker.py` |
+| Change CORS behavior | `beacon_spear/middleware.py` (custom, not django-cors-headers) |
+| Modify JWT auth | `accounts/jwt.py` (custom, not simplejwt) |
+| Change settings/env | `beacon_spear/settings.py` (custom .env loader, no python-dotenv) |
 
-- Start API server:
-  - `python manage.py runserver 0.0.0.0:8000`
-- Start delivery worker:
-  - `python manage.py deliveries_worker`
+## Conventions
 
-## Smoke / Integration
+- All models use UUID v4 primary keys
+- Soft-delete via nullable `deleted_at`/`revoked_at`/`disabled_at` timestamps
+- Channel configs encrypted with Fernet in `config_json_encrypted` field
+- JSON fields suffixed `_json` (e.g., `tags_json`, `filter_json`, `headers_json`)
+- Custom URL converter `uuidhex` for dashless UUID ingest URLs
+- No Celery/RQ — worker is a polling management command with exponential backoff
+- No external auth library — custom JWT implementation in `accounts/jwt.py`
+- Refresh token rotation with `family_id` tracking for replay detection
 
-- Optional live channel smoke (requires real provider credentials):
-  - `python manage.py smoke_channels --live --bark-url <...> --mqtt-host <...> --mqtt-username <...> --mqtt-password <...>`
+## Security (Do Not)
 
-## Security Considerations
+- Keep SSRF checks in `beacon/ssrf.py` enabled — blocks loopback, link-local, private IPs
+- Do not log secrets (device keys, access tokens, passwords)
+- Do not bypass `CHANNEL_CONFIG_ENCRYPTION_KEY` — channel configs must be encrypted at rest
+- Sensitive headers are redacted before storage (see `beacon/redaction.py`)
 
-- Keep SSRF checks in `beacon/ssrf.py` enabled.
-- Do not log secrets (device keys, access tokens, passwords).
+## Testing
+
+- `python manage.py test` runs all tests
+- Test files: `api/tests.py`, `api/test_*.py`, `beacon/tests.py`, `beacon/test_*.py`, `accounts/tests.py`
+- Tests use Django's built-in test runner (no pytest)
+- Smoke tests require live credentials: `python manage.py smoke_channels --live`
