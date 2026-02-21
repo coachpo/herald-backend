@@ -291,7 +291,7 @@ EMAIL_BACKEND = (
 )
 EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
 
-APP_BASE_URL = os.environ.get("NEXT_PUBLIC_BASE_URL", "http://localhost:3000")
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:3000")
 
 
 def _normalize_origin(raw: str) -> str | None:
