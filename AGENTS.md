@@ -35,7 +35,7 @@ python manage.py smoke_channels --live   # optional live channel smoke test
 | Add notification provider | `beacon/{provider}.py` + wire in `deliveries_worker.py` |
 | Change CORS behavior | `beacon_spear/middleware.py` (custom, not django-cors-headers) |
 | Modify JWT auth | `accounts/jwt.py` (custom, not simplejwt) |
-| Change settings/env | `beacon_spear/settings.py` (custom .env loader, no python-dotenv) |
+| Change settings/env | `beacon_spear/settings.py` (custom .env loader, no python-dotenv; SQLite default, no Postgres driver) |
 
 ## Conventions
 
