@@ -21,6 +21,6 @@ from django.urls import include, path
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("healthz", lambda request: JsonResponse({"ok": True})),
+    path("health", lambda request: JsonResponse({"status": "ok"})),
     path("api/", include("api.urls")),
 ]

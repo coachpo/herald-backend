@@ -2,7 +2,7 @@
 
 ## Overview
 
-Django 5.2 + DRF backend. JSON API under `/api/`, health check at `/healthz`, background delivery worker via management command.
+Django 5.2 + DRF backend. JSON API under `/api/`, health check at `/health`, background delivery worker via management command.
 
 ## Structure
 
