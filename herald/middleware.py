@@ -30,7 +30,7 @@ class CorsMiddleware:
                 res["Access-Control-Allow-Headers"] = requested_headers
             else:
                 res["Access-Control-Allow-Headers"] = (
-                    "Authorization, Content-Type, Accept, X-Beacon-Ingest-Key"
+                    "Authorization, Content-Type, Accept, X-Herald-Ingest-Key"
                 )
 
             res["Access-Control-Max-Age"] = "600"

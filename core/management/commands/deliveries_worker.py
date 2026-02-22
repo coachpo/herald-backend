@@ -6,11 +6,11 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from beacon.bark import build_bark_payload, send_bark_push
-from beacon.mqtt import send_mqtt_publish
-from beacon.ntfy import build_ntfy_request, send_ntfy_publish
-from beacon.template import build_template_context, render_template
-from beacon.models import Delivery
+from core.bark import build_bark_payload, send_bark_push
+from core.mqtt import send_mqtt_publish
+from core.ntfy import build_ntfy_request, send_ntfy_publish
+from core.template import build_template_context, render_template
+from core.models import Delivery
 
 
 def _backoff_seconds(attempt_count: int) -> int:
@@ -21,7 +21,7 @@ def _backoff_seconds(attempt_count: int) -> int:
 
 
 class Command(BaseCommand):
-    help = "Beacon Spear delivery worker"
+    help = "Herald delivery worker"
 
     def handle(self, *args, **options):
         poll = float(getattr(settings, "WORKER_POLL_SECONDS", 1.0))

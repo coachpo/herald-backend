@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 from accounts.jwt import issue_access_token
 from accounts.models import User
 from accounts.tokens import hash_token
-from beacon.models import IngestEndpoint, Message
+from core.models import IngestEndpoint, Message
 
 
 class IngestEndpointArchiveTests(TestCase):
@@ -26,7 +26,7 @@ class IngestEndpointArchiveTests(TestCase):
             f"/api/ingest/{ep.id.hex}",
             data=b'{"body":"hello"}',
             content_type="application/json",
-            HTTP_X_BEACON_INGEST_KEY=raw,
+            HTTP_X_HERALD_INGEST_KEY=raw,
         )
         self.assertEqual(resp1.status_code, 201)
         self.assertEqual(Message.objects.count(), 1)
@@ -54,6 +54,6 @@ class IngestEndpointArchiveTests(TestCase):
             f"/api/ingest/{ep.id.hex}",
             data=b'{"body":"hello2"}',
             content_type="application/json",
-            HTTP_X_BEACON_INGEST_KEY=raw,
+            HTTP_X_HERALD_INGEST_KEY=raw,
         )
         self.assertEqual(resp4.status_code, 401)

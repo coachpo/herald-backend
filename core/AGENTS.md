@@ -1,4 +1,4 @@
-# backend/beacon/AGENTS.md
+# backend/core/AGENTS.md
 
 ## Overview
 

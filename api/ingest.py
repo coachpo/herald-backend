@@ -10,9 +10,9 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from accounts.tokens import hash_token
-from beacon.models import Delivery, ForwardingRule, IngestEndpoint, Message
-from beacon.redaction import redact_headers
-from beacon.rules import rule_matches_message
+from core.models import Delivery, ForwardingRule, IngestEndpoint, Message
+from core.redaction import redact_headers
+from core.rules import rule_matches_message
 
 
 _DeliveryModel = cast(Any, Delivery)
@@ -60,7 +60,7 @@ def ingest_view(request, endpoint_id):
     except _IngestEndpointModel.DoesNotExist:
         return _json_error(code="not_authenticated", message="unauthorized", status=401)
 
-    raw_key = (request.headers.get("X-Beacon-Ingest-Key") or "").strip()
+    raw_key = (request.headers.get("X-Herald-Ingest-Key") or "").strip()
     if not raw_key:
         return _json_error(code="not_authenticated", message="unauthorized", status=401)
 

@@ -6,7 +6,7 @@ from rest_framework import serializers
 from urllib.parse import urlparse
 
 from accounts.models import User
-from beacon.models import Channel, Delivery, ForwardingRule, IngestEndpoint, Message
+from core.models import Channel, Delivery, ForwardingRule, IngestEndpoint, Message
 
 
 class UserSerializer(serializers.ModelSerializer):

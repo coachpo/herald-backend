@@ -14,9 +14,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.tokens import generate_secret_token, hash_token
-from beacon.models import Channel, Delivery, ForwardingRule, IngestEndpoint, Message
-from beacon.rules import rule_matches_message
-from beacon.template import build_template_context, render_template
+from core.models import Channel, Delivery, ForwardingRule, IngestEndpoint, Message
+from core.rules import rule_matches_message
+from core.template import build_template_context, render_template
 
 from .errors import api_error
 from .permissions import VerifiedEmailForUnsafeMethods
@@ -367,12 +367,12 @@ class ChannelTestView(APIView):
         body = str(data.get("body") or "").strip() or None
         payload_json = data.get("payload_json")
         if not body and payload_json is None:
-            body = "Test notification from Beacon Spear"
+            body = "Test notification from Herald"
 
         t = str(channel.type or "").strip()
         try:
             if t == "bark":
-                from beacon.bark import send_bark_push
+                from core.bark import send_bark_push
 
                 cfg = channel.config
                 server_base_url = str(cfg.get("server_base_url") or "").strip()
@@ -387,10 +387,10 @@ class ChannelTestView(APIView):
                     payload.update(payload_json)
                 if title is not None:
                     payload["title"] = title
-                payload.setdefault("title", "Beacon Spear test")
+                payload.setdefault("title", "Herald test")
                 if body is not None:
                     payload["body"] = body
-                payload.setdefault("body", "Test notification from Beacon Spear")
+                payload.setdefault("body", "Test notification from Herald")
 
                 if cfg.get("device_key") is not None:
                     payload["device_key"] = cfg.get("device_key")
@@ -401,11 +401,11 @@ class ChannelTestView(APIView):
                     server_base_url=server_base_url, payload=payload
                 )
             elif t == "ntfy":
-                from beacon.ntfy import send_ntfy_publish
+                from core.ntfy import send_ntfy_publish
                 from urllib.parse import urljoin
                 from django.conf import settings
 
-                from beacon.ssrf import assert_ssrf_safe
+                from core.ssrf import assert_ssrf_safe
 
                 cfg = channel.config
                 server_base_url = str(cfg.get("server_base_url") or "").strip()
@@ -440,7 +440,7 @@ class ChannelTestView(APIView):
 
                 if title is not None:
                     headers.setdefault("Title", title)
-                headers.setdefault("Title", "Beacon Spear test")
+                headers.setdefault("Title", "Herald test")
 
                 token = str(cfg.get("access_token") or "").strip()
                 if token:
@@ -454,7 +454,7 @@ class ChannelTestView(APIView):
                     else None
                 )
 
-                body_text = body or "Test notification from Beacon Spear"
+                body_text = body or "Test notification from Herald"
                 ok, meta = send_ntfy_publish(
                     url=url,
                     body=body_text.encode("utf-8"),
@@ -462,7 +462,7 @@ class ChannelTestView(APIView):
                     auth=auth,
                 )
             elif t == "mqtt":
-                from beacon.mqtt import send_mqtt_publish
+                from core.mqtt import send_mqtt_publish
 
                 cfg = channel.config
                 broker_host = str(cfg.get("broker_host") or "").strip()
@@ -481,7 +481,7 @@ class ChannelTestView(APIView):
                 if isinstance(payload_json, dict):
                     payload_obj = payload_json
                 else:
-                    payload_obj = body or "Test notification from Beacon Spear"
+                    payload_obj = body or "Test notification from Herald"
 
                 ok, meta = send_mqtt_publish(
                     broker_host=broker_host,

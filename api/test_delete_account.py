@@ -7,7 +7,7 @@ from typing import Any, cast
 from accounts.jwt import issue_access_token
 from accounts.models import User
 from accounts.tokens import hash_token
-from beacon.models import IngestEndpoint, Message
+from core.models import IngestEndpoint, Message
 
 
 _IngestEndpointModel = cast(Any, IngestEndpoint)

@@ -8,10 +8,10 @@ from accounts.models import User as UserModel
 from accounts.tokens import hash_token
 from accounts.models import EmailVerificationToken as EmailVerificationTokenModel
 from accounts.models import PasswordResetToken as PasswordResetTokenModel
-from beacon.models import IngestEndpoint as IngestEndpointModel
-from beacon.models import Message as MessageModel
-from beacon.models import Channel as ChannelModel
-from beacon.models import ForwardingRule as ForwardingRuleModel
+from core.models import IngestEndpoint as IngestEndpointModel
+from core.models import Message as MessageModel
+from core.models import Channel as ChannelModel
+from core.models import ForwardingRule as ForwardingRuleModel
 
 User: Any = UserModel
 EmailVerificationToken: Any = EmailVerificationTokenModel
@@ -41,7 +41,7 @@ class IngestTests(TestCase):
             f"/api/ingest/{ep.id.hex}",
             data=b'{"body":"hello"}',
             content_type="application/json",
-            HTTP_X_BEACON_INGEST_KEY=raw,
+            HTTP_X_HERALD_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 413)
         self.assertEqual(Message.objects.count(), 0)
@@ -61,7 +61,7 @@ class IngestTests(TestCase):
             f"/api/ingest/{ep.id.hex}",
             data=b"\xff",
             content_type="application/json",
-            HTTP_X_BEACON_INGEST_KEY=raw,
+            HTTP_X_HERALD_INGEST_KEY=raw,
         )
 
         self.assertEqual(resp.status_code, 400)
@@ -80,7 +80,7 @@ class IngestTests(TestCase):
             f"/api/ingest/{ep.id.hex}",
             data=b'{"body":"hello"}',
             content_type="application/json",
-            HTTP_X_BEACON_INGEST_KEY=raw,
+            HTTP_X_HERALD_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(Message.objects.count(), 0)
@@ -119,7 +119,7 @@ class IngestTests(TestCase):
             f"/api/ingest/{ep.id.hex}",
             data=b'{"body":"hello"}',
             content_type="application/json",
-            HTTP_X_BEACON_INGEST_KEY="wrong-token",
+            HTTP_X_HERALD_INGEST_KEY="wrong-token",
         )
         self.assertEqual(resp.status_code, 401)
         self.assertEqual(Message.objects.count(), 0)
@@ -141,7 +141,7 @@ class IngestTests(TestCase):
             f"/api/ingest/{ep.id.hex}",
             data=b'{"body":"hello"}',
             content_type="application/json",
-            HTTP_X_BEACON_INGEST_KEY=raw,
+            HTTP_X_HERALD_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 401)
         self.assertEqual(Message.objects.count(), 0)
@@ -161,7 +161,7 @@ class IngestTests(TestCase):
             f"/api/ingest/{ep.id.hex}",
             data=b'{"title":"Hi","body":"hello","priority":4,"tags":["a"]}',
             content_type="application/json",
-            HTTP_X_BEACON_INGEST_KEY=raw,
+            HTTP_X_HERALD_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(Message.objects.count(), 1)
@@ -178,7 +178,7 @@ class IngestTests(TestCase):
                 (
                     v
                     for k, v in msg.headers_json.items()
-                    if k.lower() == "x-beacon-ingest-key"
+                    if k.lower() == "x-herald-ingest-key"
                 ),
                 None,
             ),
@@ -200,7 +200,7 @@ class IngestTests(TestCase):
             f"/api/ingest/{ep.id}",
             data=b'{"body":"hello from dashed"}',
             content_type="application/json",
-            HTTP_X_BEACON_INGEST_KEY=raw,
+            HTTP_X_HERALD_INGEST_KEY=raw,
         )
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(Message.objects.count(), 1)

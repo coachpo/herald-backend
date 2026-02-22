@@ -26,7 +26,7 @@ from accounts.sessions import (
 )
 from accounts.tokens import hash_token
 
-from beacon.models import IngestEndpoint
+from core.models import IngestEndpoint
 
 from .errors import api_error
 from .ratelimit import allow_rate

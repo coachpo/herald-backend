@@ -2,13 +2,13 @@ from unittest.mock import Mock, patch
 
 from django.test import TestCase
 
-from beacon.bark import send_bark_push
+from core.bark import send_bark_push
 
 
 class BarkSendFallbackTests(TestCase):
-    @patch("beacon.bark.assert_ssrf_safe")
-    @patch("beacon.bark.requests.get")
-    @patch("beacon.bark.requests.post")
+    @patch("core.bark.assert_ssrf_safe")
+    @patch("core.bark.requests.get")
+    @patch("core.bark.requests.post")
     def test_falls_back_to_legacy_get_on_404(
         self, post: Mock, get: Mock, assert_ssrf_safe: Mock
     ):

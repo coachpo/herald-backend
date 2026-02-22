@@ -3,8 +3,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import User
-from beacon.crypto import _fernet
-from beacon.models import Channel
+from core.crypto import _fernet
+from core.models import Channel
 
 
 class ChannelsCreateTests(TestCase):

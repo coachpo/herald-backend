@@ -8,8 +8,8 @@ from django.utils import timezone
 from accounts.models import User
 from accounts.tokens import generate_secret_token, hash_token
 from api.serializers import BarkChannelConfigSerializer, MqttChannelConfigSerializer
-from beacon.management.commands.deliveries_worker import Command as WorkerCommand
-from beacon.models import Channel, Delivery, ForwardingRule, IngestEndpoint, Message
+from core.management.commands.deliveries_worker import Command as WorkerCommand
+from core.models import Channel, Delivery, ForwardingRule, IngestEndpoint, Message
 
 
 def _require(val: str | None, *, name: str) -> str:
@@ -32,7 +32,7 @@ class Command(BaseCommand):
         parser.add_argument("--mqtt-port", default="8883")
         parser.add_argument("--mqtt-username", default="")
         parser.add_argument("--mqtt-password", default="")
-        parser.add_argument("--mqtt-topic", default="beacon-spear/smoke")
+        parser.add_argument("--mqtt-topic", default="herald/smoke")
 
         parser.add_argument(
             "--live",
@@ -73,7 +73,7 @@ class Command(BaseCommand):
         mqtt_username = str(options["mqtt_username"] or "").strip()
         mqtt_password = str(options["mqtt_password"] or "")
         mqtt_port = int(options["mqtt_port"])
-        mqtt_topic_base = str(options["mqtt_topic"] or "beacon-spear/smoke").strip()
+        mqtt_topic_base = str(options["mqtt_topic"] or "herald/smoke").strip()
         mqtt_topic = f"{mqtt_topic_base.rstrip('/')}/{uuid.uuid4()}"
 
         if bark_url:
@@ -84,7 +84,7 @@ class Command(BaseCommand):
                 user=user,
                 channel=bark_channel,
                 name="smoke-bark-rule",
-                payload_template={"title": "Smoke", "body": "Hello from Beacon Spear"},
+                payload_template={"title": "Smoke", "body": "Hello from Herald"},
             )
             bark_delivery = self._enqueue_delivery(
                 user, msg, bark_rule, bark_channel, now
@@ -109,7 +109,7 @@ class Command(BaseCommand):
                 user=user,
                 channel=mqtt_channel,
                 name="smoke-mqtt-rule",
-                payload_template={"body": "hello-from-beacon-spear"},
+                payload_template={"body": "hello-from-herald"},
             )
 
             mqtt_delivery = self._enqueue_delivery(
@@ -196,7 +196,7 @@ class Command(BaseCommand):
                 "tls_insecure": False,
                 "qos": 1,
                 "retain": True,
-                "client_id": "beacon-spear-smoke",
+                "client_id": "herald-smoke",
                 "keepalive_seconds": 60,
             }
         )

@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from beacon.models import Channel, ForwardingRule, IngestEndpoint
+from core.models import Channel, ForwardingRule, IngestEndpoint
 
 _ChannelModel = cast(Any, Channel)
 _ForwardingRuleModel = cast(Any, ForwardingRule)

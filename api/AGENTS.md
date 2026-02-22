@@ -33,7 +33,7 @@ edge-config
 ## Conventions
 
 - Error responses: `api_error(code=..., message=..., status=..., details=...)` — consistent `{code, message}` shape
-- Ingest endpoint is a raw Django view (`@csrf_exempt`), not a DRF APIView — no JWT auth, uses ingest token via `X-Beacon-Ingest-Key` header
+- Ingest endpoint is a raw Django view (`@csrf_exempt`), not a DRF APIView — no JWT auth, uses ingest token via `X-Herald-Ingest-Key` header
 - Resource views use DRF `APIView` (not ViewSets or routers)
 - Custom URL converter `uuidhex` registered for dashless UUID ingest URLs
 - `VerifiedEmailForUnsafeMethods` permission on resource views — reads allowed for unverified users

@@ -5,7 +5,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import User
-from beacon.models import Channel
+from core.models import Channel
 
 
 class ChannelTestEndpointTests(TestCase):
@@ -18,7 +18,7 @@ class ChannelTestEndpointTests(TestCase):
         self.user.save(update_fields=["email_verified_at"])
         self.client.force_authenticate(user=self.user)
 
-    @patch("beacon.bark.send_bark_push")
+    @patch("core.bark.send_bark_push")
     def test_channel_test_bark_sends(self, send_bark_push: Mock):
         send_bark_push.return_value = (True, {"http_status": 200})
         ch = Channel(
@@ -27,7 +27,7 @@ class ChannelTestEndpointTests(TestCase):
         ch.config = {
             "server_base_url": "https://bark.example.com",
             "device_key": "Abcdef0123456789",
-            "default_payload_json": {"group": "beacon"},
+            "default_payload_json": {"group": "herald"},
         }
         ch.save()
 
@@ -44,7 +44,7 @@ class ChannelTestEndpointTests(TestCase):
         self.assertEqual(pr.get("provider"), "bark")
         send_bark_push.assert_called()
 
-    @patch("beacon.mqtt.send_mqtt_publish")
+    @patch("core.mqtt.send_mqtt_publish")
     def test_channel_test_mqtt_sends(self, send_mqtt_publish: Mock):
         send_mqtt_publish.return_value = (
             True,
@@ -56,7 +56,7 @@ class ChannelTestEndpointTests(TestCase):
         ch.config = {
             "broker_host": "mqtt.example.com",
             "broker_port": 1883,
-            "topic": "beacon/test",
+            "topic": "herald/test",
             "qos": 0,
             "retain": False,
             "tls": False,
@@ -78,8 +78,8 @@ class ChannelTestEndpointTests(TestCase):
         self.assertEqual(pr.get("provider"), "mqtt")
         send_mqtt_publish.assert_called()
 
-    @patch("beacon.ssrf.assert_ssrf_safe")
-    @patch("beacon.ntfy.send_ntfy_publish")
+    @patch("core.ssrf.assert_ssrf_safe")
+    @patch("core.ntfy.send_ntfy_publish")
     def test_channel_test_ntfy_sends(
         self, send_ntfy_publish: Mock, assert_ssrf_safe: Mock
     ):
@@ -89,8 +89,8 @@ class ChannelTestEndpointTests(TestCase):
         )
         ch.config = {
             "server_base_url": "https://ntfy.example.com",
-            "topic": "beacon-test",
-            "default_headers_json": {"Tags": "beacon"},
+            "topic": "herald-test",
+            "default_headers_json": {"Tags": "herald"},
         }
         ch.save()
 

@@ -1,4 +1,4 @@
-# Beacon Spear Backend (Django)
+# Herald Backend (Django)
 
 Implements the v0.1 backend JSON API + ingest endpoint + delivery worker.
 
