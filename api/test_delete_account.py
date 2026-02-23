@@ -39,7 +39,7 @@ class DeleteAccountTests(TestCase):
         with patch("accounts.emails.send_mail"):
             resp: Any = self.client.post(
                 "/api/auth/delete-account",
-                data={"password": "password123", "confirm": "DELETE"},
+                data={"password": "password123"},
                 format="json",
                 HTTP_AUTHORIZATION=f"Bearer {access}",
             )
@@ -58,26 +58,13 @@ class DeleteAccountTests(TestCase):
         with patch("accounts.emails.send_mail"):
             resp: Any = self.client.post(
                 "/api/auth/delete-account",
-                data={"password": "wrong", "confirm": "DELETE"},
+                data={"password": "wrong"},
                 format="json",
                 HTTP_AUTHORIZATION=f"Bearer {access}",
             )
         self.assertEqual(resp.status_code, 401)
         self.assertTrue(User.objects.filter(id=user.id).exists())
 
-    def test_delete_account_rejects_bad_confirm(self):
-        user = User.objects.create_user(email="a@example.com", password="password123")
-        access = issue_access_token(user)
-
-        with patch("accounts.emails.send_mail"):
-            resp: Any = self.client.post(
-                "/api/auth/delete-account",
-                data={"password": "password123", "confirm": "nope"},
-                format="json",
-                HTTP_AUTHORIZATION=f"Bearer {access}",
-            )
-        self.assertEqual(resp.status_code, 400)
-        self.assertTrue(User.objects.filter(id=user.id).exists())
 
     def test_delete_account_does_not_500_when_email_send_fails(self):
         user = User.objects.create_user(email="a@example.com", password="password123")
@@ -86,7 +73,7 @@ class DeleteAccountTests(TestCase):
         with patch("accounts.emails.send_mail", side_effect=Exception("smtp")):
             resp: Any = self.client.post(
                 "/api/auth/delete-account",
-                data={"password": "password123", "confirm": "DELETE"},
+                data={"password": "password123"},
                 format="json",
                 HTTP_AUTHORIZATION=f"Bearer {access}",
             )
